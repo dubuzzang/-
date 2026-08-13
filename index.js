@@ -1319,20 +1319,6 @@ function computeStats(links, today) {
   return { platforms, totalToday, totalDaily, totalTodayAll, totalDailyAll, rankingEntries, perLink, overallRanking, platformRanking };
 }
 
-app.post('/admin/settings/youtube', (req, res) => {
-  if (!isLoggedIn(req)) return res.status(401).json({ success: false, error: '로그인이 필요해요' });
-  const username = getCurrentUser(req);
-  const { youtubeId } = req.body;
-  if (!youtubeId || !/^[a-zA-Z0-9_-]{6,}$/.test(youtubeId)) {
-    return res.json({ success: false, error: '올바른 유튜브 영상 ID가 아니에요' });
-  }
-  const users = loadUsers();
-  if (!users[username]) return res.status(401).json({ success: false, error: '로그인이 필요해요' });
-  users[username].youtubeId = youtubeId;
-  saveUsers(users);
-  res.json({ success: true });
-});
-
 app.post('/admin/api/collect-prices-now', async (req, res) => {
   if (!isLoggedIn(req)) return res.status(401).json({ success: false });
   if (!isAdminUser(req)) return res.status(403).json({ success: false, error: '관리자만 실행할 수 있어요' });
@@ -1482,7 +1468,6 @@ app.get('/admin', (req, res) => {
     cleanupExpiredUserLinks();
     return res.redirect('/admin/renew');
   }
-  const myYoutubeId = myUserData.youtubeId || '';
   const viewingUser = (isAdmin && req.query.viewUser) ? req.query.viewUser : currentUser;
   const links = getVisibleLinks(req);
   const host = req.protocol + '://' + req.get('host');
@@ -1754,10 +1739,6 @@ app.get('/admin', (req, res) => {
           ` : ''}
         </div>
         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-          <input type="text" id="ytLinkInput" placeholder="🎵 유튜브 링크 붙여넣기" style="width:220px; margin-bottom:0;">
-          <button type="button" class="btn-ghost" onclick="applyYouTubeLink()" style="white-space:nowrap;">음악 적용</button>
-          <a href="/admin/export.csv" class="btn-ghost" style="white-space:nowrap; text-decoration:none; display:inline-block;">📊 CSV 다운로드</a>
-          ${isAdmin ? `<button type="button" class="btn-ghost" onclick="collectPricesNow()" style="white-space:nowrap;">🏷️ 가격 지금 수집</button>` : ''}
           <button type="button" class="btn-ghost" onclick="document.getElementById('profilePanel').style.display = document.getElementById('profilePanel').style.display === 'none' ? 'block' : 'none';" style="white-space:nowrap;">⚙️ 내 프로필</button>
           <button type="button" class="btn-ghost" onclick="document.getElementById('guideModal').style.display='flex';" style="white-space:nowrap;">📖 사용법</button>
           <button type="button" id="soundToggleBtn" class="btn-ghost cute" onclick="toggleSound()" style="white-space:nowrap;">🔇 소리 끄기</button>
@@ -1854,8 +1835,6 @@ app.get('/admin', (req, res) => {
         </div>
       </div>
 
-      <div id="ytPlayerContainer" style="position:fixed; bottom:0; right:0; width:1px; height:1px; opacity:0; pointer-events:none; overflow:hidden;"></div>
-      <script>window.__myYoutubeId = ${JSON.stringify(myYoutubeId)};</script>
       <script>window.__myDisclosures = ${JSON.stringify(getDisclosureTexts(myUserData))};</script>
       <div style="height:22px;"></div>
 
@@ -1945,20 +1924,8 @@ app.get('/admin', (req, res) => {
             <input type="text" name="folder" placeholder="폴더 (선택, 예: 여름프로모션)" style="flex:1;">
           </div>
           <div style="display:flex; gap:8px;">
-            <input type="date" name="expiresAt" title="만료일 (선택)" style="flex:1;">
-            <input type="number" name="milestoneStep" placeholder="알림 단위(기본 100)" min="1" style="flex:1;">
-          </div>
-          <div style="display:flex; gap:8px;">
             <input type="number" name="price" placeholder="가격 (선택, 원)" style="flex:1;">
             <input type="number" name="discountRate" placeholder="할인율% (선택)" style="flex:1;">
-          </div>
-          <div style="display:flex; gap:8px;">
-            <input type="text" name="abGroup" placeholder="A/B 테스트 그룹명 (선택)" style="flex:1;">
-            <select name="abVariant" style="flex:1;">
-              <option value="">A/B 아님</option>
-              <option value="A">A안</option>
-              <option value="B">B안</option>
-            </select>
           </div>
           <button type="submit" class="btn-primary" style="width:100%;">등록하기</button>
         </form>
@@ -1975,17 +1942,6 @@ app.get('/admin', (req, res) => {
           <div id="searchResults"></div>
           <button onclick="closeSearchModal()" class="btn-ghost" style="margin-top:16px; width:100%;">닫기</button>
         </div>
-      </div>
-
-      <div class="glass" style="padding:18px 22px; margin-bottom:20px;">
-        <div class="eyebrow cute" style="font-size:14px; margin-bottom:10px;">🆚 상품 비교</div>
-        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
-          <select id="compareA" class="cmp-select"></select>
-          <span style="color:#8A6A93; font-size:12px;">VS</span>
-          <select id="compareB" class="cmp-select"></select>
-          <button type="button" class="btn-ghost" onclick="runCompare()">비교하기</button>
-        </div>
-        <div id="compareResult" style="margin-top:14px;"></div>
       </div>
 
       ${isAdmin ? `
@@ -2530,44 +2486,6 @@ app.get('/admin', (req, res) => {
         applyFilters();
       }
 
-      // ===== 상품 비교 =====
-      function populateCompareSelects() {
-        const full = window.__linkFull || {};
-        const selA = document.getElementById('compareA');
-        const selB = document.getElementById('compareB');
-        if (!selA || !selB) return;
-        const codes = Object.keys(full);
-        selA.innerHTML = codes.map(c => '<option value="' + c + '">' + full[c].title + '</option>').join('');
-        selB.innerHTML = codes.map(c => '<option value="' + c + '">' + full[c].title + '</option>').join('');
-        if (codes.length > 1) selB.selectedIndex = 1;
-      }
-      populateCompareSelects();
-
-      function runCompare() {
-        const full = window.__linkFull || {};
-        const a = full[document.getElementById('compareA').value];
-        const b = full[document.getElementById('compareB').value];
-        const box = document.getElementById('compareResult');
-        if (!a || !b) { box.innerHTML = ''; return; }
-        const platformIconsCmp = { coupang: '🚀', toss: '💳', naver: '🟢', olive: '💄' };
-        function row(label, va, vb) {
-          const aWin = va > vb ? 'color:#E0399B; font-weight:800;' : 'color:#8A6A93;';
-          const bWin = vb > va ? 'color:#E0399B; font-weight:800;' : 'color:#8A6A93;';
-          return '<div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid rgba(255,111,181,0.12); font-size:12px;">' +
-            '<span style="' + aWin + '">' + va + '</span>' +
-            '<span style="color:#8A6A93;">' + label + '</span>' +
-            '<span style="' + bWin + '">' + vb + '</span>' +
-          '</div>';
-        }
-        box.innerHTML =
-          '<div style="display:flex; justify-content:space-between; font-size:12px; font-weight:700; color:#4A2545; margin-bottom:6px;">' +
-            '<span>' + platformIconsCmp[a.platform] + ' ' + a.title + '</span>' +
-            '<span>' + platformIconsCmp[b.platform] + ' ' + b.title + '</span>' +
-          '</div>' +
-          row('오늘 클릭', a.today, b.today) +
-          row('누적 클릭', a.total, b.total);
-      }
-
       // ===== 사운드 시스템 (외부 음원 파일 없이 Web Audio API로 직접 합성) =====
       let audioCtx = null;
       let soundOn = false;
@@ -2593,70 +2511,9 @@ app.get('/admin', (req, res) => {
         osc.stop(t0 + (duration || 0.2) + 0.05);
       }
 
-      // ===== 유튜브 배경음악 =====
+      // (유튜브 배경음악 기능은 삭제됨 — 아래 두 함수는 마일스톤 사운드 코드에서 참조하므로 빈 상태로 남겨둠)
       let ytPlayer = null;
-      let ytApiLoading = false;
       let ytVolume = 35;
-
-      function extractYouTubeId(url) {
-        const m = url.match(/(?:youtu\\.be\\/|youtube\\.com\\/(?:watch\\?v=|embed\\/|shorts\\/))([a-zA-Z0-9_-]{6,})/);
-        if (m) return m[1];
-        if (/^[a-zA-Z0-9_-]{6,}$/.test(url.trim())) return url.trim();
-        return null;
-      }
-
-      function loadYouTubeApi() {
-        if (ytApiLoading || (window.YT && window.YT.Player)) return;
-        ytApiLoading = true;
-        const tag = document.createElement('script');
-        tag.src = 'https://www.youtube.com/iframe_api';
-        document.body.appendChild(tag);
-      }
-
-      window.onYouTubeIframeAPIReady = function() {
-        if (window.__myYoutubeId) createYtPlayer(window.__myYoutubeId);
-      };
-
-      function createYtPlayer(videoId) {
-        if (ytPlayer && ytPlayer.loadVideoById) {
-          ytPlayer.loadVideoById(videoId);
-          return;
-        }
-        ytPlayer = new YT.Player('ytPlayerContainer', {
-          height: '1',
-          width: '1',
-          videoId: videoId,
-          playerVars: { autoplay: 0, loop: 1, playlist: videoId, controls: 0 },
-          events: {
-            onReady: function(e) {
-              e.target.setVolume(ytVolume);
-              if (soundOn) e.target.playVideo();
-            }
-          }
-        });
-      }
-
-      async function applyYouTubeLink() {
-        const input = document.getElementById('ytLinkInput');
-        const id = extractYouTubeId(input.value.trim());
-        if (!id) { alert('올바른 유튜브 링크를 넣어주세요'); return; }
-        try {
-          const res = await fetch('/admin/settings/youtube', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ youtubeId: id })
-          });
-          const data = await res.json();
-          if (!data.success) { alert('저장 실패: ' + data.error); return; }
-        } catch (e) {
-          alert('저장 중 오류가 발생했어요');
-          return;
-        }
-        window.__myYoutubeId = id;
-        loadYouTubeApi();
-        if (window.YT && window.YT.Player) createYtPlayer(id);
-        alert('내 계정에 음악이 저장됐어요! 사운드를 켜면 재생돼요. (다른 사람에게는 들리지 않고, 내 계정으로 로그인할 때만 재생돼요)');
-      }
 
       function duckMusic() {
         if (ytPlayer && ytPlayer.setVolume) {
@@ -2771,22 +2628,11 @@ app.get('/admin', (req, res) => {
           btn.textContent = '🔊 소리 켜짐';
           playTone(880, 0, 0.15, 'square', 0.12);
           playTone(1320, 0.12, 0.2, 'square', 0.1);
-          if (ytPlayer && ytPlayer.playVideo) {
-            ytPlayer.playVideo();
-          } else if (window.__myYoutubeId) {
-            loadYouTubeApi();
-          }
           checkMilestones();
           checkPriceDrops();
         } else {
           btn.textContent = '🔇 소리 끄기';
-          if (ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo();
         }
-      }
-
-      // 페이지 열자마자, 내 계정에 저장된 유튜브 링크가 있으면 미리 준비해둠 (재생은 사운드 켜야 시작됨)
-      if (window.__myYoutubeId) {
-        loadYouTubeApi();
       }
 
       // 소리를 못 낸 상태에서도 누적치는 계속 기록해둬서, 나중에 소리 켰을 때 놓치지 않게 함
@@ -2999,22 +2845,6 @@ app.get('/admin', (req, res) => {
           alert(data.valid ? '✔ 키가 정상적으로 작동해요' : '✖ 키에 문제가 있어요: ' + (data.error || ''));
         } catch (e) {
           alert('확인 중 오류가 발생했어요');
-        }
-      }
-
-      async function collectPricesNow() {
-        alert('가격 수집을 시작할게요. 링크가 많으면 몇 분 걸릴 수 있어요. 끝나면 알려드릴게요.');
-        try {
-          const res = await fetch('/admin/api/collect-prices-now', { method: 'POST' });
-          const data = await res.json();
-          if (data.success) {
-            alert('가격 수집이 끝났어요! 새로고침해서 확인해보세요.');
-            location.reload();
-          } else {
-            alert('실패: ' + (data.error || ''));
-          }
-        } catch (e) {
-          alert('오류가 발생했어요');
         }
       }
 
