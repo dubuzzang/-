@@ -777,6 +777,38 @@ const THEME_STYLE = `
     .btn-ghost:hover { background: rgba(255,111,181,0.06); }
     a { color: #B84FD6; }
     .mono { font-family: 'Baloo 2', 'Consolas', monospace; }
+
+    .app-shell { display: flex; min-height: 100vh; position: relative; z-index: 1; }
+    .sidebar {
+      width: 230px; flex-shrink: 0; padding: 28px 18px; display: flex; flex-direction: column;
+      position: sticky; top: 0; align-self: flex-start; height: 100vh; overflow-y: auto;
+    }
+    .sidebar-brand { font-size: 22px; color: #4A2545; margin-bottom: 26px; display: flex; align-items: center; gap: 6px; }
+    .sidebar-profile { display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.7); border-radius: 16px; padding: 12px; margin-bottom: 20px; }
+    .sidebar-avatar { width: 38px; height: 38px; border-radius: 50%; background: rgba(255,111,181,0.18); display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; overflow: hidden; }
+    .sidebar-avatar img { width: 100%; height: 100%; object-fit: cover; }
+    .sidebar-name { font-size: 13px; font-weight: 700; color: #4A2545; }
+    .sidebar-logout { font-size: 11px; color: #B084F5; }
+    .sidebar-nav { display: flex; flex-direction: column; gap: 6px; }
+    .nav-item {
+      display: flex; align-items: center; gap: 10px; text-align: left; width: 100%;
+      background: transparent; border: none; color: #8A6A93; font-weight: 600; font-size: 13px;
+      padding: 11px 14px; border-radius: 14px;
+    }
+    .nav-item:hover { background: rgba(255,111,181,0.08); }
+    .nav-item.active { background: #FFFFFF; color: #E0399B; box-shadow: 0 2px 10px rgba(255,111,181,0.18); }
+    .sidebar-leaf { margin-top: auto; width: 100%; opacity: 0.7; }
+    .main-content { flex: 1; min-width: 0; padding: 28px 32px; position: relative; z-index: 1; }
+
+    @media (max-width: 860px) {
+      .app-shell { flex-direction: column; }
+      .sidebar { width: 100%; height: auto; position: relative; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 16px; gap: 10px 14px; }
+      .sidebar-brand { margin-bottom: 0; font-size: 18px; }
+      .sidebar-profile { margin-bottom: 0; }
+      .sidebar-nav { flex-direction: row; flex-wrap: wrap; flex: 1; }
+      .sidebar-leaf { display: none; }
+      .main-content { padding: 16px; }
+    }
   </style>
 `;
 
@@ -1713,15 +1745,39 @@ app.get('/admin', (req, res) => {
   </head>
   <body>
     ${RADAR_BG}
-    <div class="wrap" style="position:relative; z-index:1;">
-      <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="sidebar-brand cute">반짝딜 ✨</div>
+        <div class="sidebar-profile">
+          <div class="sidebar-avatar">${myUserData.avatarUrl ? `<img src="${escapeHtml(myUserData.avatarUrl)}" onerror="this.parentElement.textContent='👤';">` : '👤'}</div>
+          <div>
+            <div class="sidebar-name">${escapeHtml(myUserData.nickname || currentUser)}${isAdmin ? ' (관리자)' : ''}</div>
+            <a href="/admin/logout" class="sidebar-logout">로그아웃</a>
+          </div>
+        </div>
+        <nav class="sidebar-nav">
+          <button type="button" class="nav-item active" onclick="window.scrollTo({top:0, behavior:'smooth'});">🏠 대시보드</button>
+          <button type="button" class="nav-item" onclick="togglePanel('profilePanel')">⚙️ 내 프로필</button>
+          ${isAdmin ? `
+          <button type="button" class="nav-item" onclick="togglePanel('invitePanel')">🎟️ 초대 코드</button>
+          <button type="button" class="nav-item" onclick="togglePanel('statsPanel')">📊 사용자 통계</button>
+          <button type="button" class="nav-item" onclick="togglePanel('usersPanel')">👥 사용자 관리</button>
+          ` : ''}
+          <button type="button" class="nav-item" onclick="document.getElementById('guideModal').style.display='flex';">📖 사용법</button>
+          <button type="button" class="nav-item" id="soundToggleBtn" onclick="toggleSound()">🔇 소리 끄기</button>
+        </nav>
+        <svg class="sidebar-leaf" viewBox="0 0 200 260" xmlns="http://www.w3.org/2000/svg">
+          <g fill="none" stroke="#FFC1DE" stroke-width="2.5" opacity="0.6">
+            <path d="M20 250 C25 200, 55 160, 100 130 C90 170, 70 210, 55 250"/>
+            <path d="M25 220 C50 190, 75 170, 105 155"/>
+            <path d="M45 245 C55 215, 75 190, 95 175"/>
+          </g>
+        </svg>
+      </aside>
+      <main class="main-content">
+      <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
         <div>
           <div class="eyebrow">💗 반짝반짝 대시보드 💗</div>
-          <h1 class="cute">반짝딜 ✨</h1>
-          <div style="font-size:11px; color:#8A6A93; margin-top:2px; display:flex; align-items:center; gap:6px;">
-            ${myUserData.avatarUrl ? `<img src="${escapeHtml(myUserData.avatarUrl)}" style="width:18px; height:18px; border-radius:50%; object-fit:cover;" onerror="this.style.display='none';">` : ''}
-            <span>👤 ${escapeHtml(myUserData.nickname || currentUser)}${isAdmin ? ' (관리자)' : ''} · <a href="/admin/logout" style="color:#8A6A93;">로그아웃</a></span>
-          </div>
           ${!isAdmin ? `
           <div style="font-size:11px; margin-top:4px;">
             ${myUserData.subscriptionType === 'lifetime'
@@ -1736,16 +1792,6 @@ app.get('/admin', (req, res) => {
           ${isAdmin && viewingUser !== currentUser ? `
           <div style="font-size:12px; color:#E0399B; margin-top:6px;">🔍 지금 보고 있는 사용자: <strong>${escapeHtml(viewingUser)}</strong>의 링크 &nbsp; <a href="/admin" style="color:#B84FD6;">← 내 링크로 돌아가기</a></div>
           ` : ''}
-        </div>
-        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-          <button type="button" class="btn-ghost" onclick="document.getElementById('profilePanel').style.display = document.getElementById('profilePanel').style.display === 'none' ? 'block' : 'none';" style="white-space:nowrap;">⚙️ 내 프로필</button>
-          ${isAdmin ? `
-          <button type="button" class="btn-ghost" onclick="document.getElementById('invitePanel').style.display = document.getElementById('invitePanel').style.display === 'none' ? 'block' : 'none';" style="white-space:nowrap;">🎟️ 초대 코드</button>
-          <button type="button" class="btn-ghost" onclick="document.getElementById('statsPanel').style.display = document.getElementById('statsPanel').style.display === 'none' ? 'block' : 'none';" style="white-space:nowrap;">📊 사용자 통계</button>
-          <button type="button" class="btn-ghost" onclick="document.getElementById('usersPanel').style.display = document.getElementById('usersPanel').style.display === 'none' ? 'block' : 'none';" style="white-space:nowrap;">👥 사용자 관리</button>
-          ` : ''}
-          <button type="button" class="btn-ghost" onclick="document.getElementById('guideModal').style.display='flex';" style="white-space:nowrap;">📖 사용법</button>
-          <button type="button" id="soundToggleBtn" class="btn-ghost cute" onclick="toggleSound()" style="white-space:nowrap;">🔇 소리 끄기</button>
         </div>
       </div>
 
@@ -2127,11 +2173,8 @@ app.get('/admin', (req, res) => {
         `;
       })()}
 
-      <div style="display:flex; gap:8px; margin-bottom:16px;">
-        <button type="button" class="btn-ghost" onclick="downloadReportImage()">🖼️ 이번 주 리포트 이미지</button>
-      </div>
-
       <div class="grid" id="linkGrid">${cards}</div>
+      </main>
     </div>
 
     <script>
@@ -2629,6 +2672,12 @@ app.get('/admin', (req, res) => {
         }
       }
 
+      function togglePanel(id) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.style.display = el.style.display === 'none' ? 'block' : 'none';
+      }
+
       function toggleSound() {
         const btn = document.getElementById('soundToggleBtn');
         soundOn = !soundOn;
@@ -2800,39 +2849,6 @@ app.get('/admin', (req, res) => {
             alert(msg);
           }
         } catch (e) {}
-      }
-
-      // ===== 주간 리포트 이미지 생성 =====
-      function downloadReportImage() {
-        const full = window.__linkFull || {};
-        const items = Object.keys(full).map(c => full[c]).sort((a, b) => b.total - a.total).slice(0, 5);
-        const canvas = document.createElement('canvas');
-        canvas.width = 600;
-        canvas.height = 120 + items.length * 60;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#FFE9F5';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#4A2545';
-        ctx.font = 'bold 26px sans-serif';
-        ctx.fillText('💗 반짝딜 - 인기 상품 리포트', 24, 46);
-        ctx.font = '13px sans-serif';
-        ctx.fillStyle = '#8A6A93';
-        ctx.fillText(new Date().toLocaleDateString('ko-KR'), 24, 70);
-        items.forEach((it, i) => {
-          const y = 110 + i * 60;
-          ctx.fillStyle = 'rgba(255,111,181,0.12)';
-          ctx.fillRect(24, y, canvas.width - 48, 46);
-          ctx.fillStyle = '#4A2545';
-          ctx.font = 'bold 15px sans-serif';
-          ctx.fillText((i + 1) + '. ' + it.title, 40, y + 20);
-          ctx.fillStyle = '#E0A200';
-          ctx.font = 'bold 14px sans-serif';
-          ctx.fillText('누적 ' + it.total + '회 · 오늘 ' + it.today + '회', 40, y + 38);
-        });
-        const link = document.createElement('a');
-        link.download = 'sparkle-deal-report.png';
-        link.href = canvas.toDataURL('image/png');
-        link.click();
       }
 
       // ===== 브라우저 알림 (탭이 열려있는 동안, 다른 화면 보고 있어도 표시됨) =====
