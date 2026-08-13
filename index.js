@@ -613,35 +613,24 @@ app.get('/r/:code/go', (req, res) => {
   recordCountryClick(code, ip).catch(() => {});
 });
 
-// ===== 공통 테크/AI 다크 테마 스타일 (미래형 레이더 + 테두리를 따라 흐르는 빛) =====
+// ===== 공통 파스텔 핑크 반짝이는 테마 스타일 (블링블링 글리터 배경) =====
 const RADAR_BG = `
-  <div class="grid-floor"></div>
-  <div class="scanlines"></div>
-  <svg class="radar-svg" viewBox="0 0 400 400" style="position:fixed; top:50%; left:50%; width:1300px; height:1300px; margin:-650px 0 0 -650px; pointer-events:none; z-index:0; opacity:0.28;">
-    <defs>
-      <linearGradient id="sweepGradient" x1="0" y1="0" x2="1" y2="0">
-        <stop offset="0%" stop-color="#7c48eb" stop-opacity="0.55"/>
-        <stop offset="100%" stop-color="#7c48eb" stop-opacity="0"/>
-      </linearGradient>
-    </defs>
-    <circle cx="200" cy="200" r="180" fill="none" stroke="rgba(124,72,235,0.36)" stroke-width="1.2"/>
-    <circle cx="200" cy="200" r="140" fill="none" stroke="rgba(124,72,235,0.3)" stroke-width="1" stroke-dasharray="2 6"/>
-    <circle cx="200" cy="200" r="100" fill="none" stroke="rgba(124,72,235,0.28)" stroke-width="1"/>
-    <circle cx="200" cy="200" r="60" fill="none" stroke="rgba(124,72,235,0.26)" stroke-width="1" stroke-dasharray="2 6"/>
-    <circle cx="200" cy="200" r="20" fill="none" stroke="rgba(124,72,235,0.4)" stroke-width="1.2"/>
-    <line x1="8" y1="200" x2="392" y2="200" stroke="rgba(61,90,254,0.28)" stroke-width="1"/>
-    <line x1="200" y1="8" x2="200" y2="392" stroke="rgba(61,90,254,0.28)" stroke-width="1"/>
-    <g style="transform-origin:200px 200px; animation: radarSpin 7s linear infinite;">
-      <path d="M200,200 L200,20 A180,180 0 0,1 274,49 Z" fill="url(#sweepGradient)"/>
-    </g>
-    <circle cx="200" cy="200" r="3" fill="#7c48eb"/>
-    <circle cx="304" cy="132" r="3" fill="#7c48eb" opacity="0.8">
-      <animate attributeName="opacity" values="0.9;0.15;0.9" dur="2.2s" repeatCount="indefinite"/>
-    </circle>
-    <circle cx="128" cy="292" r="2.5" fill="#3d5afe" opacity="0.7">
-      <animate attributeName="opacity" values="0.8;0.1;0.8" dur="2.8s" repeatCount="indefinite"/>
-    </circle>
-  </svg>
+  <div class="sparkle-blobs">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+  </div>
+  <div class="sparkle-dust">
+    ${Array.from({ length: 26 }).map((_, i) => {
+      const left = (i * 37 + 5) % 100;
+      const top = (i * 53 + 11) % 100;
+      const delay = (i % 10) * 0.35;
+      const dur = 2.6 + (i % 5) * 0.5;
+      const size = 3 + (i % 4);
+      const kind = i % 3 === 0 ? '✦' : (i % 3 === 1 ? '✧' : '•');
+      return `<span class="dust" style="left:${left}%; top:${top}%; animation-delay:${delay}s; animation-duration:${dur}s; font-size:${size + 6}px;">${kind}</span>`;
+    }).join('')}
+  </div>
 `;
 
 // ===== 사용법 설명서 (새 기능을 추가할 때마다 여기에 이어서 기록해요) =====
@@ -659,7 +648,7 @@ const FEATURE_GUIDE = [
     title: '📊 통계 · 그래프 · 랭킹',
     items: [
       '오늘 전체/플랫폼별(쿠팡·토스·네이버·올리브영) 클릭수와 일자별 그래프 제공',
-      '그래프 밑에 요일 표시, 종합 그래프에는 최고점(핑크)·최저점(시안) 네온으로 강조',
+      '그래프 밑에 요일 표시, 종합 그래프에는 최고점(핑크)·최저점(라벤더)로 강조',
       '🗓️ 날짜별 방문 합계 조회: 달력에서 하루 또는 기간을 클릭해서 과거 통계 확인',
       '🆚 상품 비교: 두 상품을 골라 오늘/누적 클릭수 비교',
       '20초마다 자동으로 화면이 갱신돼요 (F5 필요 없음)'
@@ -689,8 +678,8 @@ const FEATURE_GUIDE = [
 function renderFeatureGuideHtml() {
   return FEATURE_GUIDE.map((section) => `
     <div style="margin-bottom:18px;">
-      <div style="font-size:13px; font-weight:800; color:#3d5afe; margin-bottom:8px;">${section.title}</div>
-      <ul style="margin:0; padding-left:18px; font-size:12px; color:#c9d6e3; line-height:1.8;">
+      <div style="font-size:13px; font-weight:800; color:#FF4FA3; margin-bottom:8px;">${section.title}</div>
+      <ul style="margin:0; padding-left:18px; font-size:12px; color:#8A6A93; line-height:1.8;">
         ${section.items.map((it) => `<li>${it}</li>`).join('')}
       </ul>
     </div>
@@ -699,94 +688,96 @@ function renderFeatureGuideHtml() {
 
 const THEME_STYLE = `
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Jua&family=Baloo+2:wght@500;700;800&family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet">
   <style>
-    * { box-sizing: border-box; }
-    html { background: #0a0e24; margin: 0; }
-    .cute { font-family: 'Orbitron', 'Segoe UI', sans-serif; letter-spacing: 1px; }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html { background: #FFE9F5; margin: 0; }
+    .cute { font-family: 'Jua', 'Noto Sans KR', sans-serif; letter-spacing: 0.5px; }
     body {
-      font-family: 'Share Tech Mono', 'Segoe UI', -apple-system, 'Malgun Gothic', monospace;
-      background: linear-gradient(180deg, #0a0e24 0%, #0d1230 25%, #0b1436 50%, #0a1a38 75%, #081c30 100%);
+      font-family: 'Noto Sans KR', -apple-system, 'Malgun Gothic', sans-serif;
+      background: linear-gradient(160deg, #FFE9F5 0%, #FDEBFF 30%, #F1E6FF 60%, #FFF0F7 100%);
       background-attachment: fixed;
-      background-image:
-        radial-gradient(circle at 12% 8%, rgba(124,72,235,0.12), transparent 35%),
-        radial-gradient(circle at 88% 14%, rgba(61,90,254,0.14), transparent 30%),
-        radial-gradient(circle at 50% 100%, rgba(124,72,235,0.14), transparent 45%);
-      color: #FFFFFF;
+      color: #4A2545;
       margin: 0;
       min-height: 100vh;
       overflow-x: hidden;
       position: relative;
+      -webkit-font-smoothing: antialiased;
     }
-    .grid-floor {
-      position: fixed; left: 0; bottom: 0; width: 100%; height: 45vh;
-      background-image:
-        linear-gradient(rgba(124,72,235,0.28) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(61,90,254,0.32) 1px, transparent 1px);
-      background-size: 48px 48px;
-      transform: perspective(320px) rotateX(62deg);
-      transform-origin: bottom;
-      -webkit-mask-image: linear-gradient(180deg, transparent, #000 35%);
-      mask-image: linear-gradient(180deg, transparent, #000 35%);
-      pointer-events: none; z-index: 0; opacity: 0.35;
+
+    .sparkle-blobs { position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
+    .blob {
+      position: absolute; border-radius: 50%; filter: blur(50px); opacity: 0.55;
+      animation: blobFloat 14s ease-in-out infinite;
     }
-    .scanlines {
-      position: fixed; inset: 0; pointer-events: none; z-index: 1;
-      background-image: repeating-linear-gradient(180deg, rgba(255,255,255,0.025) 0px, rgba(255,255,255,0.025) 1px, transparent 2px, transparent 4px);
-      mix-blend-mode: overlay;
+    .blob-1 { width: 380px; height: 380px; top: -80px; left: -60px; background: radial-gradient(circle, #FFB6DE, transparent 70%); animation-duration: 16s; }
+    .blob-2 { width: 320px; height: 320px; top: 30%; right: -100px; background: radial-gradient(circle, #D6B8FF, transparent 70%); animation-duration: 19s; animation-delay: -4s; }
+    .blob-3 { width: 300px; height: 300px; bottom: -80px; left: 20%; background: radial-gradient(circle, #FFD9EE, transparent 70%); animation-duration: 21s; animation-delay: -9s; }
+    @keyframes blobFloat {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      33% { transform: translate(30px, -25px) scale(1.08); }
+      66% { transform: translate(-20px, 20px) scale(0.95); }
     }
-    .cute {
-      text-shadow: 0 0 4px rgba(124,72,235,0.5), 0 0 12px rgba(124,72,235,0.32);
+
+    .sparkle-dust { position: fixed; inset: 0; pointer-events: none; z-index: 1; }
+    .dust {
+      position: absolute; color: #FF9FD1; opacity: 0;
+      text-shadow: 0 0 6px rgba(255,159,209,0.9), 0 0 12px rgba(214,184,255,0.7);
+      animation: twinkle 3s ease-in-out infinite;
     }
-    @keyframes radarSpin { to { transform: rotate(360deg); } }
+    @keyframes twinkle {
+      0%, 100% { opacity: 0; transform: scale(0.6) rotate(0deg); }
+      50% { opacity: 1; transform: scale(1.15) rotate(20deg); }
+    }
+
+    .cute { text-shadow: 0 1px 0 rgba(255,255,255,0.6); }
     .glass {
       position: relative;
-      background: rgba(16,20,42,0.82);
-      border: 1px solid rgba(124,72,235,0.26);
-      border-radius: 18px;
-      box-shadow: 0 12px 34px rgba(124,72,235,0.22), 0 0 0 1px rgba(61,90,254,0.22);
-      backdrop-filter: blur(12px);
+      background: rgba(255,255,255,0.82);
+      border: 1px solid rgba(255,111,181,0.28);
+      border-radius: 22px;
+      box-shadow: 0 10px 30px rgba(255,111,181,0.16), 0 0 0 1px rgba(255,255,255,0.5) inset;
+      backdrop-filter: blur(10px);
       z-index: 1;
     }
     .glass > * { position: relative; z-index: 3; }
-    input[type="text"], input[type="password"] {
+    input[type="text"], input[type="password"], input[type="email"], input[type="number"], input[type="date"], select {
       width: 100%;
       padding: 11px 14px;
-      border-radius: 10px;
-      border: 1px solid rgba(124,72,235,0.28);
-      background: rgba(8,4,15,0.78);
-      color: #FFFFFF;
+      border-radius: 14px;
+      border: 1.5px solid rgba(255,111,181,0.28);
+      background: rgba(255,255,255,0.9);
+      color: #4A2545;
       margin-bottom: 12px;
       box-sizing: border-box;
       font-size: 14px;
       outline: none;
+      font-family: 'Noto Sans KR', sans-serif;
     }
-    input::placeholder { color: #7a92a8; }
-    input:focus { border-color: #7c48eb; box-shadow: 0 0 0 3px rgba(124,72,235,0.24); }
-    button {
-      font-family: inherit;
-      cursor: pointer;
-    }
+    input::placeholder { color: #C79BC9; }
+    input:focus, select:focus { border-color: #FF6FB5; box-shadow: 0 0 0 3px rgba(255,111,181,0.18); }
+    button { font-family: inherit; cursor: pointer; }
     .btn-primary {
-      background: #FF5A7A;
+      background: linear-gradient(135deg, #FF6FB5, #B084F5);
       color: #ffffff;
       border: none;
       padding: 12px 20px;
-      border-radius: 10px;
+      border-radius: 999px;
       font-weight: 800;
       letter-spacing: 0.3px;
-      box-shadow: 0 4px 18px rgba(255,90,122,0.35);
+      box-shadow: 0 6px 18px rgba(255,111,181,0.4);
     }
+    .btn-primary:hover { filter: brightness(1.05); }
     .btn-ghost {
-      background: rgba(61,90,254,0.26);
-      color: #3d5afe;
-      border: 1px solid rgba(124,72,235,0.32);
+      background: rgba(255,111,181,0.12);
+      color: #E0399B;
+      border: 1.5px solid rgba(255,111,181,0.32);
       padding: 10px 16px;
-      border-radius: 10px;
-      font-weight: 600;
+      border-radius: 999px;
+      font-weight: 700;
     }
-    a { color: #3d5afe; }
-    .mono { font-family: 'Consolas', 'SFMono-Regular', monospace; }
+    a { color: #B84FD6; }
+    .mono { font-family: 'Baloo 2', 'Consolas', monospace; }
   </style>
 `;
 
@@ -799,21 +790,21 @@ app.get('/admin/login', (req, res) => {
     <body style="display:flex; justify-content:center; align-items:center; height:100vh;">
       ${RADAR_BG}
       <form method="POST" action="/admin/login" class="glass" style="padding:36px; width:300px;">
-        <div style="font-size:12px; color:#3d5afe; letter-spacing:2px; margin-bottom:6px;">🔐 SYSTEM LOGIN</div>
-        <h2 class="cute" style="margin:0 0 20px; color:#FFFFFF; font-weight:normal;">로그인</h2>
+        <div style="font-size:12px; color:#E0399B; letter-spacing:2px; margin-bottom:6px;">💗 반짝 로그인</div>
+        <h2 class="cute" style="margin:0 0 20px; color:#4A2545; font-weight:normal;">로그인</h2>
         <input type="text" name="username" placeholder="아이디" required autocomplete="username" value="${escapeHtml(savedUsername)}">
         <input type="password" name="password" placeholder="비밀번호" required autocomplete="current-password">
-        <label style="font-size:11px; color:#9083ab; display:flex; align-items:center; gap:6px; margin-bottom:6px;">
+        <label style="font-size:11px; color:#8A6A93; display:flex; align-items:center; gap:6px; margin-bottom:6px;">
           <input type="checkbox" name="saveId" style="width:auto; margin:0;" ${savedUsername ? 'checked' : ''}> 아이디 저장
         </label>
-        <label style="font-size:11px; color:#9083ab; display:flex; align-items:center; gap:6px; margin-bottom:12px;">
+        <label style="font-size:11px; color:#8A6A93; display:flex; align-items:center; gap:6px; margin-bottom:12px;">
           <input type="checkbox" name="autoLogin" style="width:auto; margin:0;" ${autoLoginPref ? 'checked' : ''}> 자동 로그인 (30일 동안 로그인 유지)
         </label>
         <button type="submit" class="btn-primary" style="width:100%; margin-top:6px;">접속하기</button>
         <div style="display:flex; justify-content:space-between; margin-top:14px; font-size:11px;">
-          <a href="/admin/signup" style="color:#9083ab;">회원가입</a>
-          <a href="/admin/find-id" style="color:#9083ab;">아이디 찾기</a>
-          <a href="/admin/reset-password" style="color:#9083ab;">비밀번호 찾기</a>
+          <a href="/admin/signup" style="color:#8A6A93;">회원가입</a>
+          <a href="/admin/find-id" style="color:#8A6A93;">아이디 찾기</a>
+          <a href="/admin/reset-password" style="color:#8A6A93;">비밀번호 찾기</a>
         </div>
       </form>
     </body></html>
@@ -866,8 +857,8 @@ app.post('/admin/login', (req, res) => {
         <body style="display:flex; justify-content:center; align-items:center; height:100vh;">
           ${RADAR_BG}
           <form method="POST" action="/admin/login/verify-2fa" class="glass" style="padding:36px; width:300px;">
-            <div style="font-size:12px; color:#3d5afe; letter-spacing:2px; margin-bottom:6px;">🛡️ 2FA</div>
-            <h2 class="cute" style="margin:0 0 20px; color:#FFFFFF; font-weight:normal;">인증 코드 입력</h2>
+            <div style="font-size:12px; color:#E0399B; letter-spacing:2px; margin-bottom:6px;">🛡️ 2FA</div>
+            <h2 class="cute" style="margin:0 0 20px; color:#4A2545; font-weight:normal;">인증 코드 입력</h2>
             <input type="hidden" name="pending" value="${escapeHtml(pending)}">
             <input type="hidden" name="saveId" value="${saveId ? '1' : ''}">
             <input type="hidden" name="autoLogin" value="${autoLogin ? '1' : ''}">
@@ -926,8 +917,8 @@ app.get('/admin/signup', (req, res) => {
     <body style="display:flex; justify-content:center; align-items:center; height:100vh;">
       ${RADAR_BG}
       <form method="POST" action="/admin/signup" class="glass" style="padding:36px; width:320px;">
-        <div style="font-size:12px; color:#3d5afe; letter-spacing:2px; margin-bottom:6px;">📝 SIGN UP</div>
-        <h2 class="cute" style="margin:0 0 20px; color:#FFFFFF; font-weight:normal;">회원가입</h2>
+        <div style="font-size:12px; color:#E0399B; letter-spacing:2px; margin-bottom:6px;">📝 회원가입</div>
+        <h2 class="cute" style="margin:0 0 20px; color:#4A2545; font-weight:normal;">회원가입</h2>
         <input type="text" name="username" placeholder="아이디 (영문/숫자 추천)" required autocomplete="off">
         <input type="password" name="password" placeholder="비밀번호" required autocomplete="new-password">
         <input type="password" name="passwordConfirm" placeholder="비밀번호 확인" required autocomplete="new-password">
@@ -935,7 +926,7 @@ app.get('/admin/signup', (req, res) => {
         <input type="text" name="referrer" placeholder="초대 코드 (관리자에게 문의)" required autocomplete="off">
         <button type="submit" class="btn-primary" style="width:100%; margin-top:6px;">가입하기</button>
         <div style="text-align:center; margin-top:14px; font-size:11px;">
-          <a href="/admin/login" style="color:#9083ab;">← 로그인으로 돌아가기</a>
+          <a href="/admin/login" style="color:#8A6A93;">← 로그인으로 돌아가기</a>
         </div>
       </form>
     </body></html>
@@ -1002,12 +993,12 @@ app.get('/admin/find-id', (req, res) => {
     <body style="display:flex; justify-content:center; align-items:center; height:100vh;">
       ${RADAR_BG}
       <form method="POST" action="/admin/find-id" class="glass" style="padding:36px; width:320px;">
-        <div style="font-size:12px; color:#3d5afe; letter-spacing:2px; margin-bottom:6px;">🔎 FIND ID</div>
-        <h2 class="cute" style="margin:0 0 20px; color:#FFFFFF; font-weight:normal;">아이디 찾기</h2>
+        <div style="font-size:12px; color:#E0399B; letter-spacing:2px; margin-bottom:6px;">🔎 아이디 찾기</div>
+        <h2 class="cute" style="margin:0 0 20px; color:#4A2545; font-weight:normal;">아이디 찾기</h2>
         <input type="email" name="email" placeholder="가입할 때 등록한 이메일" required>
         <button type="submit" class="btn-primary" style="width:100%; margin-top:6px;">찾기</button>
         <div style="text-align:center; margin-top:14px; font-size:11px;">
-          <a href="/admin/login" style="color:#9083ab;">← 로그인으로 돌아가기</a>
+          <a href="/admin/login" style="color:#8A6A93;">← 로그인으로 돌아가기</a>
         </div>
       </form>
     </body></html>
@@ -1025,9 +1016,9 @@ app.post('/admin/find-id', (req, res) => {
       ${RADAR_BG}
       <div class="glass" style="padding:32px; text-align:center; width:320px;">
         ${matches.length
-          ? `<p style="color:#FFFFFF;">이 이메일로 가입된 아이디예요:</p><p style="color:#3d5afe; font-weight:800; font-size:16px;">${matches.map(escapeHtml).join(', ')}</p>`
+          ? `<p style="color:#4A2545;">이 이메일로 가입된 아이디예요:</p><p style="color:#E0399B; font-weight:800; font-size:16px;">${matches.map(escapeHtml).join(', ')}</p>`
           : `<p style="color:#ff3860;">이 이메일로 가입된 아이디가 없어요.</p>`}
-        <a href="/admin/login" style="color:#9083ab; font-size:12px;">← 로그인으로 돌아가기</a>
+        <a href="/admin/login" style="color:#8A6A93; font-size:12px;">← 로그인으로 돌아가기</a>
       </div>
     </body></html>
   `);
@@ -1040,14 +1031,14 @@ app.get('/admin/reset-password', (req, res) => {
     <body style="display:flex; justify-content:center; align-items:center; height:100vh;">
       ${RADAR_BG}
       <form method="POST" action="/admin/reset-password" class="glass" style="padding:36px; width:320px;">
-        <div style="font-size:12px; color:#3d5afe; letter-spacing:2px; margin-bottom:6px;">🔑 RESET PASSWORD</div>
-        <h2 class="cute" style="margin:0 0 20px; color:#FFFFFF; font-weight:normal;">비밀번호 찾기</h2>
+        <div style="font-size:12px; color:#E0399B; letter-spacing:2px; margin-bottom:6px;">🔑 비밀번호 찾기</div>
+        <h2 class="cute" style="margin:0 0 20px; color:#4A2545; font-weight:normal;">비밀번호 찾기</h2>
         <input type="text" name="username" placeholder="아이디" required autocomplete="off">
         <input type="email" name="email" placeholder="가입할 때 등록한 이메일" required autocomplete="off">
         <input type="password" name="newPassword" placeholder="새 비밀번호" required autocomplete="new-password">
         <button type="submit" class="btn-primary" style="width:100%; margin-top:6px;">비밀번호 변경</button>
         <div style="text-align:center; margin-top:14px; font-size:11px;">
-          <a href="/admin/login" style="color:#9083ab;">← 로그인으로 돌아가기</a>
+          <a href="/admin/login" style="color:#8A6A93;">← 로그인으로 돌아가기</a>
         </div>
       </form>
     </body></html>
@@ -1090,7 +1081,7 @@ app.post('/admin/reset-password', (req, res) => {
       ${RADAR_BG}
       <div class="glass" style="padding:32px; text-align:center;">
         <p style="color:#6EE7B7;">비밀번호가 변경됐어요!</p>
-        <a href="/admin/login" style="color:#3d5afe;">로그인하러 가기</a>
+        <a href="/admin/login" style="color:#E0399B;">로그인하러 가기</a>
       </div>
     </body></html>
   `);
@@ -1114,34 +1105,34 @@ app.get('/admin/edit/:code', (req, res) => {
     <body style="padding:32px;">
       ${RADAR_BG}
       <div class="glass" style="max-width:420px; padding:28px; margin:0 auto;">
-        <div style="font-size:12px; color:#3d5afe; letter-spacing:2px; margin-bottom:6px;">✏️ EDIT NODE</div>
-        <h2 class="cute" style="margin:0 0 18px; color:#FFFFFF; font-weight:normal;">${escapeHtml(code)} 수정</h2>
+        <div style="font-size:12px; color:#E0399B; letter-spacing:2px; margin-bottom:6px;">✏️ 링크 수정</div>
+        <h2 class="cute" style="margin:0 0 18px; color:#4A2545; font-weight:normal;">${escapeHtml(code)} 수정</h2>
         <form method="POST" action="/admin/edit">
           <input type="hidden" name="code" value="${escapeHtml(code)}">
-          <label style="font-size:12px; color:#3d5afe;">쿠팡 링크</label>
+          <label style="font-size:12px; color:#E0399B;">쿠팡 링크</label>
           <input type="text" name="url" value="${escapeHtml(link.url)}" required>
-          <label style="font-size:12px; color:#3d5afe;">제목</label>
+          <label style="font-size:12px; color:#E0399B;">제목</label>
           <input type="text" name="title" value="${escapeHtml(link.title || '')}">
-          <label style="font-size:12px; color:#3d5afe;">설명</label>
+          <label style="font-size:12px; color:#E0399B;">설명</label>
           <input type="text" name="description" value="${escapeHtml(link.description || '')}">
-          <label style="font-size:12px; color:#3d5afe;">이미지 주소</label>
+          <label style="font-size:12px; color:#E0399B;">이미지 주소</label>
           <input type="text" name="image" id="editImageInput" value="${escapeHtml(link.image || '')}" oninput="updateEditPreview()">
-          <img id="editImagePreview" src="${escapeHtml(link.image ? imgProxyUrl(host, link.image) : '')}" style="width:100%; max-height:180px; object-fit:cover; border-radius:12px; margin-bottom:16px; display:${link.image ? 'block' : 'none'}; background:#07030f; border:1px solid rgba(124,72,235,0.24);" onerror="this.style.display='none';" onload="this.style.display='block';">
-          <label style="font-size:12px; color:#3d5afe;">카테고리</label>
+          <img id="editImagePreview" src="${escapeHtml(link.image ? imgProxyUrl(host, link.image) : '')}" style="width:100%; max-height:180px; object-fit:cover; border-radius:16px; margin-bottom:16px; display:${link.image ? 'block' : 'none'}; background:#FFF5FA; border:1px solid rgba(255,111,181,0.24);" onerror="this.style.display='none';" onload="this.style.display='block';">
+          <label style="font-size:12px; color:#E0399B;">카테고리</label>
           <select id="categorySelectEdit" onchange="onCategorySelectChange(this, 'categoryCustomEdit')" style="width:100%;">${categoryOptionsHtml(link.category || '')}</select>
           <input type="text" id="categoryCustomEdit" name="category" value="${escapeHtml(link.category || '')}" placeholder="카테고리 직접 입력" style="display:${(link.category && !COUPANG_CATEGORIES.includes(link.category)) ? 'block' : 'none'};">
-          <label style="font-size:12px; color:#3d5afe;">폴더</label>
+          <label style="font-size:12px; color:#E0399B;">폴더</label>
           <input type="text" name="folder" value="${escapeHtml(link.folder || '')}" placeholder="예: 여름프로모션">
-          <label style="font-size:12px; color:#3d5afe;">만료일 (선택)</label>
+          <label style="font-size:12px; color:#E0399B;">만료일 (선택)</label>
           <input type="date" name="expiresAt" value="${escapeHtml(link.expiresAt || '')}">
-          <label style="font-size:12px; color:#3d5afe;">클릭 알림 단위 (기본 100)</label>
+          <label style="font-size:12px; color:#E0399B;">클릭 알림 단위 (기본 100)</label>
           <input type="number" name="milestoneStep" value="${link.milestoneStep || 100}" min="1">
-          <label style="font-size:12px; color:#3d5afe;">가격 / 할인율</label>
+          <label style="font-size:12px; color:#E0399B;">가격 / 할인율</label>
           <div style="display:flex; gap:8px;">
             <input type="number" name="price" value="${link.price || ''}" placeholder="가격(원)" style="flex:1;">
             <input type="number" name="discountRate" value="${link.discountRate || ''}" placeholder="할인율%" style="flex:1;">
           </div>
-          <label style="font-size:12px; color:#3d5afe;">A/B 테스트</label>
+          <label style="font-size:12px; color:#E0399B;">A/B 테스트</label>
           <div style="display:flex; gap:8px;">
             <input type="text" name="abGroup" value="${escapeHtml(link.abGroup || '')}" placeholder="그룹명" style="flex:1;">
             <select name="abVariant" style="flex:1;">
@@ -1547,12 +1538,12 @@ app.get('/admin', (req, res) => {
           <div class="card-title" style="margin:0;">${escapeHtml(link.title || code)}</div>
         </div>
         <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">
-          ${category ? `<span class="dest-label" style="background:rgba(61,90,254,0.18); color:#3d5afe;">${escapeHtml(category)}</span>` : ''}
-          ${folder ? `<span class="dest-label" style="background:rgba(255,90,122,0.18); color:#FF5A7A;">📁 ${escapeHtml(folder)}</span>` : ''}
-          ${link.abGroup ? `<span class="dest-label yellow-emph" style="background:rgba(255,230,0,0.15); color:#FFE600;">AB:${escapeHtml(link.abGroup)}-${escapeHtml(link.abVariant || '?')}</span>` : ''}
-          ${expired ? `<span class="dest-label" style="background:rgba(255,56,96,0.2); color:#ff3860;">만료됨</span>` : (link.expiresAt ? `<span class="dest-label" style="background:rgba(124,72,235,0.15); color:#7c48eb;">~${escapeHtml(link.expiresAt)}</span>` : '')}
+          ${category ? `<span class="dest-label" style="background:rgba(255,111,181,0.16); color:#E0399B;">${escapeHtml(category)}</span>` : ''}
+          ${folder ? `<span class="dest-label" style="background:rgba(176,132,245,0.18); color:#8A4FE0;">📁 ${escapeHtml(folder)}</span>` : ''}
+          ${link.abGroup ? `<span class="dest-label yellow-emph" style="background:rgba(255,196,0,0.15); color:#E0A200;">AB:${escapeHtml(link.abGroup)}-${escapeHtml(link.abVariant || '?')}</span>` : ''}
+          ${expired ? `<span class="dest-label" style="background:rgba(255,56,96,0.2); color:#ff3860;">만료됨</span>` : (link.expiresAt ? `<span class="dest-label" style="background:rgba(176,132,245,0.15); color:#8A4FE0;">~${escapeHtml(link.expiresAt)}</span>` : '')}
         </div>
-        ${link.price ? `<div class="yellow-emph" style="font-size:13px; color:#FFE600; font-weight:800; margin-bottom:6px;">${link.price.toLocaleString()}원${link.discountRate ? ` <span style="font-size:11px; color:#ff3860;">${link.discountRate}%↓</span>` : ''}</div>` : ''}
+        ${link.price ? `<div class="yellow-emph" style="font-size:13px; color:#E0A200; font-weight:800; margin-bottom:6px;">${link.price.toLocaleString()}원${link.discountRate ? ` <span style="font-size:11px; color:#ff3860;">${link.discountRate}%↓</span>` : ''}</div>` : ''}
         ${(() => {
           const ph = link.priceHistory || {};
           const dates = Object.keys(ph).sort();
@@ -1564,17 +1555,17 @@ app.get('/admin', (req, res) => {
             const diff = latest - prev;
             diffHtml = diff > 0
               ? `<span style="color:#ff3860;">▲${diff.toLocaleString()}</span>`
-              : `<span style="color:#4dd0e1;">▼${Math.abs(diff).toLocaleString()}</span>`;
+              : `<span style="color:#3FBFA6;">▼${Math.abs(diff).toLocaleString()}</span>`;
           }
           const allValues = dates.map((d) => ph[d]);
           const lowest = Math.min(...allValues);
           const lowestHtml = latest === lowest
-            ? `<span style="color:#6EE7B7;">🏆 역대 최저가!</span>`
+            ? `<span style="color:#3FBFA6;">🏆 역대 최저가!</span>`
             : `<span style="opacity:0.7;">역대 최저 ${lowest.toLocaleString()}원 대비 +${(latest - lowest).toLocaleString()}원</span>`;
           const priceChartId = 'pricechart_' + chartId;
           return `
-            <div style="font-size:10px; color:#9083ab; margin-bottom:2px;">🏷️ 쿠팡 실시간가 ${latest.toLocaleString()}원 ${diffHtml} <span style="opacity:0.6;">(${escapeHtml(dates[dates.length - 1])} 수집)</span></div>
-            <div style="font-size:9px; color:#9083ab; margin-bottom:6px;">${lowestHtml}</div>
+            <div style="font-size:10px; color:#8A6A93; margin-bottom:2px;">🏷️ 쿠팡 실시간가 ${latest.toLocaleString()}원 ${diffHtml} <span style="opacity:0.6;">(${escapeHtml(dates[dates.length - 1])} 수집)</span></div>
+            <div style="font-size:9px; color:#8A6A93; margin-bottom:6px;">${lowestHtml}</div>
             ${dates.length >= 2 ? `<div style="height:44px; position:relative; margin-bottom:8px;"><canvas id="${priceChartId}"></canvas></div>
             <script>
               window.__priceData_${priceChartId} = ${JSON.stringify(ph)};
@@ -1588,14 +1579,14 @@ app.get('/admin', (req, res) => {
           <button type="button" class="copy-btn" onclick="copyText('${shortUrl}', this)">복사</button>
         </div>
         <div class="dest">
-          <span class="dest-label">TARGET</span>
+          <span class="dest-label">연결 링크</span>
           <a href="${link.url}" target="_blank">${link.url}</a>
         </div>
-        <div style="font-size:10px; color:#7a92a8; margin-bottom:4px;">📥 ${sourceHtml}</div>
-        <div style="font-size:10px; color:#7a92a8; margin-bottom:8px;">🌍 ${countryHtml}</div>
+        <div style="font-size:10px; color:#8A6A93; margin-bottom:4px;">📥 ${sourceHtml}</div>
+        <div style="font-size:10px; color:#8A6A93; margin-bottom:8px;">🌍 ${countryHtml}</div>
         <button type="button" class="copy-btn" style="width:100%; margin-bottom:8px;" onclick='copyPromoText(${JSON.stringify(escapeHtml(link.title || code))}, ${link.price || 0}, ${link.discountRate || 0}, ${JSON.stringify(shortUrl)}, ${JSON.stringify(platform)})'>💬 카톡 공유 문구 복사</button>
-        <div class="clicks mono" id="clicks_${chartId}">${todayClicks} <span>CLICKS · TODAY</span></div>
-        <div style="font-size:10px; color:#7a92a8; margin-top:-6px; margin-bottom:8px;" id="cum_${chartId}">누적 ${totalAllTime}회</div>
+        <div class="clicks mono" id="clicks_${chartId}">${todayClicks} <span>오늘 클릭</span></div>
+        <div style="font-size:10px; color:#8A6A93; margin-top:-6px; margin-bottom:8px;" id="cum_${chartId}">누적 ${totalAllTime}회</div>
 
         <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:8px;">
           <div class="chart-controls" style="margin-bottom:0;">
@@ -1604,7 +1595,7 @@ app.get('/admin', (req, res) => {
             <button class="range-btn" data-range="90" data-target="${chartId}">3개월</button>
             <button class="range-btn" data-range="all" data-target="${chartId}">전체</button>
           </div>
-          <img src="${qrSrc}" title="QR코드 (클릭하면 짧은 링크 복사)" style="width:40px; height:40px; border-radius:6px; background:#fff; padding:2px; cursor:pointer; flex-shrink:0;" onclick="copyText('${shortUrl}', this)">
+          <img src="${qrSrc}" title="QR코드 (클릭하면 짧은 링크 복사)" style="width:40px; height:40px; border-radius:10px; background:#fff; padding:2px; cursor:pointer; flex-shrink:0;" onclick="copyText('${shortUrl}', this)">
         </div>
         <div style="height:90px; position:relative;"><canvas id="${chartId}"></canvas></div>
 
@@ -1647,15 +1638,15 @@ app.get('/admin', (req, res) => {
   });
 
   function buildRankingRows(list, showPlatform) {
-    if (!list.length) return `<div style="font-size:12px; color:#7a92a8; padding:8px 0;">아직 클릭 기록이 없어요</div>`;
+    if (!list.length) return `<div style="font-size:12px; color:#8A6A93; padding:8px 0;">아직 클릭 기록이 없어요</div>`;
     const medals = ['🥇', '🥈', '🥉'];
     return list.map((item, i) => `
-      <div style="display:flex; align-items:center; gap:10px; padding:8px 0; ${i < list.length - 1 ? 'border-bottom:1px solid rgba(124,72,235,0.12);' : ''}">
+      <div style="display:flex; align-items:center; gap:10px; padding:8px 0; ${i < list.length - 1 ? 'border-bottom:1px solid rgba(255,111,181,0.14);' : ''}">
         <div style="width:24px; font-size:14px; text-align:center; flex-shrink:0;">${medals[i] || (i + 1)}</div>
-        <div class="rank-name" style="flex:1; min-width:0; font-size:12px; color:#FFFFFF; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+        <div class="rank-name" style="flex:1; min-width:0; font-size:12px; color:#4A2545; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
           ${showPlatform ? `<span style="opacity:0.7;">${platformIcons[item.platform]}</span> ` : ''}${escapeHtml(item.title)}
         </div>
-        <div class="rank-amt" style="font-size:12px; font-weight:700; color:#FFE600; flex-shrink:0;">${item.totalAllTime}회</div>
+        <div class="rank-amt" style="font-size:12px; font-weight:700; color:#E0A200; flex-shrink:0;">${item.totalAllTime}회</div>
       </div>
     `).join('');
   }
@@ -1682,19 +1673,20 @@ app.get('/admin', (req, res) => {
     ${THEME_STYLE}
     <style>
       .wrap { padding: 32px; max-width: 1400px; margin: 0 auto; }
-      h1 { font-size: 22px; margin-bottom: 4px; color: #FFFFFF; letter-spacing: 0.5px; }
-      .eyebrow { font-size: 12px; color: #3d5afe; letter-spacing: 3px; margin-bottom: 6px; font-weight: 600; }
+      h1 { font-size: 24px; margin-bottom: 4px; color: #4A2545; letter-spacing: 0.5px; }
+      .eyebrow { font-size: 12px; color: #E0399B; letter-spacing: 3px; margin-bottom: 6px; font-weight: 700; }
       .top-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 24px; }
       @media (max-width: 1100px) { .top-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-      @media (max-width: 620px) { .top-row { grid-template-columns: minmax(0, 1fr); } }
+      @media (max-width: 620px) { .top-row { grid-template-columns: minmax(0, 1fr); } .wrap { padding: 16px; } h1 { font-size: 20px; } }
       .total-box { padding: 20px; position: relative; overflow: hidden; display: flex; flex-direction: column; min-height: 280px; }
       .grand-box { padding: 30px 34px; position: relative; overflow: hidden; display: flex; flex-direction: column; }
+      @media (max-width: 620px) { .grand-box { padding: 20px; } }
       .total-box::before {
         content: ''; position: absolute; top: -40%; right: -20%; width: 200px; height: 200px;
-        background: radial-gradient(circle, rgba(124,72,235,0.32), transparent 70%); pointer-events: none;
+        background: radial-gradient(circle, rgba(255,111,181,0.28), transparent 70%); pointer-events: none;
       }
-      .total-num { font-size: 46px; font-weight: 900; line-height: 1; color: #FFE600; font-family: 'Consolas', monospace; }
-      .total-label { font-size: 12px; color: #3d5afe; margin-top: 8px; letter-spacing: 1px; margin-bottom: 16px; }
+      .total-num { font-size: 46px; font-weight: 800; line-height: 1; color: #E0399B; font-family: 'Baloo 2', sans-serif; }
+      .total-label { font-size: 12px; color: #8A6A93; margin-top: 8px; letter-spacing: 0.5px; margin-bottom: 16px; }
       .form-box { padding: 22px; }
       .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
       @media (max-width: 1100px) { .grid { grid-template-columns: repeat(2, 1fr); } }
@@ -1702,53 +1694,37 @@ app.get('/admin', (req, res) => {
       .card { padding: 16px; overflow: visible; position: relative; z-index: 1; }
       .card > * { position: relative; z-index: 3; }
       .card::before {
-        content: ''; position: absolute; top: 0; left: 16px; right: 16px; height: 2px;
-        background: linear-gradient(90deg, transparent, #7c48eb, #3d5afe, transparent);
+        content: ''; position: absolute; top: 0; left: 16px; right: 16px; height: 3px; border-radius: 3px;
+        background: linear-gradient(90deg, transparent, #FF6FB5, #B084F5, transparent);
         z-index: 2;
       }
-      .thumb { width: 100%; height: 100px; object-fit: cover; border-radius: 10px; margin-bottom: 10px; border: 1px solid rgba(124,72,235,0.24); cursor: pointer; transition: opacity 0.15s; }
-      .thumb:hover { opacity: 0.8; }
-      .card-title { font-size: 14px; font-weight: 800; margin-bottom: 8px; color: #FFFFFF; }
+      .thumb { width: 100%; height: 100px; object-fit: cover; border-radius: 14px; margin-bottom: 10px; border: 1px solid rgba(255,111,181,0.24); cursor: pointer; transition: opacity 0.15s; }
+      .thumb:hover { opacity: 0.85; }
+      .card-title { font-size: 14px; font-weight: 800; margin-bottom: 8px; color: #4A2545; }
       .pill-row { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
-      .pill { display: inline-block; background: rgba(61,90,254,0.26); border: 1px solid rgba(124,72,235,0.32); color: #3d5afe; font-weight: 600; padding: 5px 10px; border-radius: 999px; font-size: 10px; word-break: break-all; flex: 1; min-width: 0; }
-      .copy-btn { background: rgba(61,90,254,0.22); border: 1px solid rgba(61,90,254,0.4); color: #5b3df0; font-weight: 700; padding: 5px 9px; border-radius: 999px; font-size: 10px; flex-shrink: 0; }
-      .dest { background: rgba(8,4,15,0.78); border: 1px solid rgba(61,90,254,0.2); border-radius: 10px; padding: 9px; margin-bottom: 10px; font-size: 10px; }
-      .dest-label { display: inline-block; background: rgba(61,90,254,0.28); color: #5b3df0; border-radius: 6px; padding: 2px 6px; font-size: 9px; margin-right: 6px; letter-spacing: 1px; }
-      .dest a { color: #7a92a8; text-decoration: none; word-break: break-all; }
-      .clicks { font-size: 22px; font-weight: 900; margin-bottom: 8px; color: #FFE600; }
-      .clicks span { font-size: 10px; color: #7a92a8; font-weight: normal; margin-left: 6px; letter-spacing: 1px; }
+      .pill { display: inline-block; background: rgba(255,111,181,0.12); border: 1px solid rgba(255,111,181,0.28); color: #E0399B; font-weight: 600; padding: 5px 10px; border-radius: 999px; font-size: 10px; word-break: break-all; flex: 1; min-width: 0; }
+      .copy-btn { background: rgba(176,132,245,0.16); border: 1px solid rgba(176,132,245,0.34); color: #8A4FE0; font-weight: 700; padding: 5px 9px; border-radius: 999px; font-size: 10px; flex-shrink: 0; }
+      .dest { background: rgba(255,111,181,0.06); border: 1px solid rgba(255,111,181,0.18); border-radius: 12px; padding: 9px; margin-bottom: 10px; font-size: 10px; }
+      .dest-label { display: inline-block; background: rgba(255,111,181,0.18); color: #E0399B; border-radius: 6px; padding: 2px 6px; font-size: 9px; margin-right: 6px; letter-spacing: 0.5px; }
+      .dest a { color: #8A6A93; text-decoration: none; word-break: break-all; }
+      .clicks { font-size: 22px; font-weight: 800; margin-bottom: 8px; color: #E0A200; }
+      .clicks span { font-size: 10px; color: #8A6A93; font-weight: normal; margin-left: 6px; letter-spacing: 0.5px; }
       .chart-controls { margin-bottom: 6px; }
-      .range-btn { background: rgba(61,90,254,0.16); border: 1px solid rgba(61,90,254,0.22); color: #7a92a8; padding: 3px 8px; border-radius: 999px; font-size: 9px; margin-right: 4px; cursor: pointer; }
-      .cat-btn { background: rgba(61,90,254,0.1); border: 1px solid rgba(61,90,254,0.25); color: #9083ab; padding: 7px 16px; border-radius: 999px; font-size: 12px; cursor: pointer; }
-      .cat-btn.active { background: rgba(61,90,254,0.28); border-color: #3d5afe; color: #FFFFFF; }
-      .sub-btn { background: rgba(124,72,235,0.1); border: 1px solid rgba(124,72,235,0.25); color: #9083ab; padding: 4px 8px; border-radius: 6px; font-size: 10px; cursor: pointer; }
-      .sub-btn.active { background: rgba(124,72,235,0.3); border-color: #7c48eb; color: #FFFFFF; font-weight: 700; }
-      .cmp-select { background: rgba(4,7,13,0.75); color: #FFFFFF; border: 1px solid rgba(61,90,254,0.25); border-radius: 10px; padding: 8px 10px; font-size: 12px; }
+      .range-btn { background: rgba(255,111,181,0.1); border: 1px solid rgba(255,111,181,0.22); color: #8A6A93; padding: 3px 8px; border-radius: 999px; font-size: 9px; margin-right: 4px; cursor: pointer; }
+      .cat-btn { background: rgba(255,111,181,0.08); border: 1px solid rgba(255,111,181,0.22); color: #8A6A93; padding: 7px 16px; border-radius: 999px; font-size: 12px; cursor: pointer; }
+      .cat-btn.active { background: rgba(255,111,181,0.24); border-color: #FF6FB5; color: #E0399B; }
+      .sub-btn { background: rgba(176,132,245,0.1); border: 1px solid rgba(176,132,245,0.25); color: #8A6A93; padding: 4px 8px; border-radius: 6px; font-size: 10px; cursor: pointer; }
+      .sub-btn.active { background: rgba(176,132,245,0.28); border-color: #B084F5; color: #4A2545; font-weight: 700; }
+      .cmp-select { background: rgba(255,255,255,0.9); color: #4A2545; border: 1px solid rgba(255,111,181,0.24); border-radius: 12px; padding: 8px 10px; font-size: 12px; }
 
-      body.light-theme { background: #f1f3fb !important; color: #1a1a2e !important; }
-      body.light-theme .grid-floor, body.light-theme .scanlines, body.light-theme .radar-svg { opacity: 0.12 !important; }
-      body.light-theme .glass { background: rgba(255,255,255,0.88) !important; border-color: rgba(61,90,254,0.18) !important; box-shadow: 0 8px 24px rgba(61,90,254,0.1) !important; }
-      body.light-theme h1, body.light-theme .card-title, body.light-theme h2, body.light-theme h3 { color: #1a1a2e !important; }
-      body.light-theme p, body.light-theme span, body.light-theme div { color: inherit; }
-      body.light-theme .dest { background: rgba(0,0,0,0.04) !important; }
-      body.light-theme .dest a { color: #444 !important; }
-      body.light-theme input[type="text"], body.light-theme input[type="password"], body.light-theme input[type="email"], body.light-theme input[type="number"], body.light-theme input[type="date"], body.light-theme select {
-        background: rgba(255,255,255,0.9) !important; color: #1a1a2e !important; border-color: rgba(61,90,254,0.2) !important;
-      }
-      body.light-theme .rank-name, body.light-theme .rank-amt { color: #111111 !important; }
-      body.light-theme .yellow-emph, body.light-theme .total-num, body.light-theme .clicks, body.light-theme .invite-code {
-        color: #111111 !important;
-      }
-      .cal-text { color: #FFFFFF; }
-      .cal-text-sub { color: #9083ab; }
-      body.light-theme .cal-text { color: #111111 !important; }
-      body.light-theme .cal-text-sub { color: #5c6b7a !important; }
-      .range-btn.active { background: rgba(124,72,235,0.24); border-color: #7c48eb; color: #7c48eb; }
+      .cal-text { color: #4A2545; }
+      .cal-text-sub { color: #8A6A93; }
+      .range-btn.active { background: rgba(255,111,181,0.22); border-color: #FF6FB5; color: #E0399B; }
       .action-row { display: flex; gap: 6px; margin-top: 10px; }
-      .edit-btn { flex: 1; text-align:center; background: rgba(61,90,254,0.16); color: #7a92a8; border: 1px solid rgba(61,90,254,0.24); padding: 6px 10px; border-radius: 8px; font-size: 11px; text-decoration:none; }
+      .edit-btn { flex: 1; text-align:center; background: rgba(176,132,245,0.14); color: #8A4FE0; border: 1px solid rgba(176,132,245,0.28); padding: 6px 10px; border-radius: 10px; font-size: 11px; text-decoration:none; }
       .delete-form { flex: 1; margin: 0; }
-      .delete-btn { background: rgba(255,56,96,0.14); color: #ff3860; border: 1px solid rgba(255,56,96,0.32); padding: 6px 10px; border-radius: 8px; font-size: 11px; width: 100%; }
-      .unit-price { font-size: 11px; color: #3d5afe; margin-top: 2px; }
+      .delete-btn { background: rgba(255,56,96,0.1); color: #ff3860; border: 1px solid rgba(255,56,96,0.28); padding: 6px 10px; border-radius: 10px; font-size: 11px; width: 100%; }
+      .unit-price { font-size: 11px; color: #B84FD6; margin-top: 2px; }
     </style>
   </head>
   <body>
@@ -1756,17 +1732,17 @@ app.get('/admin', (req, res) => {
     <div class="wrap" style="position:relative; z-index:1;">
       <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
         <div>
-          <div class="eyebrow">📡 NEON DASHBOARD 📡</div>
-          <h1 class="cute">쇼핑 레이더 ⚡</h1>
-          <div style="font-size:11px; color:#7a92a8; margin-top:2px; display:flex; align-items:center; gap:6px;">
+          <div class="eyebrow">💗 반짝반짝 대시보드 💗</div>
+          <h1 class="cute">반짝딜 ✨</h1>
+          <div style="font-size:11px; color:#8A6A93; margin-top:2px; display:flex; align-items:center; gap:6px;">
             ${myUserData.avatarUrl ? `<img src="${escapeHtml(myUserData.avatarUrl)}" style="width:18px; height:18px; border-radius:50%; object-fit:cover;" onerror="this.style.display='none';">` : ''}
-            <span>👤 ${escapeHtml(myUserData.nickname || currentUser)}${isAdmin ? ' (관리자)' : ''} · <a href="/admin/logout" style="color:#7a92a8;">로그아웃</a></span>
+            <span>👤 ${escapeHtml(myUserData.nickname || currentUser)}${isAdmin ? ' (관리자)' : ''} · <a href="/admin/logout" style="color:#8A6A93;">로그아웃</a></span>
           </div>
           ${!isAdmin ? `
           <div style="font-size:11px; margin-top:4px;">
             ${myUserData.subscriptionType === 'lifetime'
-              ? `<span style="color:#6EE7B7;">♾️ 평생 이용 가능</span>`
-              : `<span style="color:${isSubscriptionExpired(myUserData) ? '#ff3860' : '#FFE600'};">📅 이용기간: ~${escapeHtml(myUserData.subscriptionExpiresAt || '미설정')} (D${(() => {
+              ? `<span style="color:#3FBFA6;">♾️ 평생 이용 가능</span>`
+              : `<span style="color:${isSubscriptionExpired(myUserData) ? '#ff3860' : '#E0A200'};">📅 이용기간: ~${escapeHtml(myUserData.subscriptionExpiresAt || '미설정')} (D${(() => {
                   if (!myUserData.subscriptionExpiresAt) return '-?';
                   const diff = Math.ceil((new Date(myUserData.subscriptionExpiresAt) - new Date(getTodayKST())) / 86400000);
                   return diff >= 0 ? '-' + diff : '+' + Math.abs(diff);
@@ -1774,7 +1750,7 @@ app.get('/admin', (req, res) => {
           </div>
           ` : ''}
           ${isAdmin && viewingUser !== currentUser ? `
-          <div style="font-size:12px; color:#FF5A7A; margin-top:6px;">🔍 지금 보고 있는 사용자: <strong>${escapeHtml(viewingUser)}</strong>의 링크 &nbsp; <a href="/admin" style="color:#3d5afe;">← 내 링크로 돌아가기</a></div>
+          <div style="font-size:12px; color:#E0399B; margin-top:6px;">🔍 지금 보고 있는 사용자: <strong>${escapeHtml(viewingUser)}</strong>의 링크 &nbsp; <a href="/admin" style="color:#B84FD6;">← 내 링크로 돌아가기</a></div>
           ` : ''}
         </div>
         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
@@ -1784,7 +1760,7 @@ app.get('/admin', (req, res) => {
           ${isAdmin ? `<button type="button" class="btn-ghost" onclick="collectPricesNow()" style="white-space:nowrap;">🏷️ 가격 지금 수집</button>` : ''}
           <button type="button" class="btn-ghost" onclick="document.getElementById('profilePanel').style.display = document.getElementById('profilePanel').style.display === 'none' ? 'block' : 'none';" style="white-space:nowrap;">⚙️ 내 프로필</button>
           <button type="button" class="btn-ghost" onclick="document.getElementById('guideModal').style.display='flex';" style="white-space:nowrap;">📖 사용법</button>
-          <button type="button" id="soundToggleBtn" class="btn-ghost cute" onclick="toggleSound()" style="white-space:nowrap;">🔇 SOUND OFF</button>
+          <button type="button" id="soundToggleBtn" class="btn-ghost cute" onclick="toggleSound()" style="white-space:nowrap;">🔇 소리 끄기</button>
         </div>
       </div>
 
@@ -1807,36 +1783,36 @@ app.get('/admin', (req, res) => {
           <div style="flex:1; min-width:220px;">
             <div class="eyebrow" style="margin-bottom:8px;">🛡️ 2단계 인증(2FA)</div>
             ${myUserData.totpEnabled ? `
-              <p style="font-size:12px; color:#6EE7B7; margin-bottom:10px;">✔ 현재 활성화되어 있어요</p>
+              <p style="font-size:12px; color:#3FBFA6; margin-bottom:10px;">✔ 현재 활성화되어 있어요</p>
               <form method="POST" action="/admin/settings/2fa/disable">
                 <button type="submit" class="btn-ghost" style="width:100%;">2FA 끄기</button>
               </form>
             ` : `
-              <p style="font-size:11px; color:#9083ab; margin-bottom:10px;">Google Authenticator 같은 앱으로 로그인 시 추가 인증을 요구해요.</p>
+              <p style="font-size:11px; color:#8A6A93; margin-bottom:10px;">Google Authenticator 같은 앱으로 로그인 시 추가 인증을 요구해요.</p>
               <button type="button" class="btn-ghost" style="width:100%; margin-bottom:10px;" onclick="start2FA()">2FA 설정 시작</button>
               <div id="totpSetupBox"></div>
             `}
           </div>
         </div>
 
-        <div style="height:1px; background:rgba(124,72,235,0.15); margin:18px 0 14px;"></div>
+        <div style="height:1px; background:rgba(255,111,181,0.18); margin:18px 0 14px;"></div>
         <div class="eyebrow" style="margin-bottom:8px;">📋 플랫폼별 공정위 문구 (카톡 공유 문구 복사시 맨 위에 자동으로 붙어요)</div>
         <form method="POST" action="/admin/settings/disclosures">
           <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:10px;">
             <div>
-              <label style="font-size:11px; color:#9083ab;">🚀 쿠팡</label>
+              <label style="font-size:11px; color:#8A6A93;">🚀 쿠팡</label>
               <input type="text" name="coupang" value="${escapeHtml(getDisclosureTexts(myUserData).coupang)}">
             </div>
             <div>
-              <label style="font-size:11px; color:#9083ab;">💳 토스</label>
+              <label style="font-size:11px; color:#8A6A93;">💳 토스</label>
               <input type="text" name="toss" value="${escapeHtml(getDisclosureTexts(myUserData).toss)}">
             </div>
             <div>
-              <label style="font-size:11px; color:#9083ab;">🟢 네이버</label>
+              <label style="font-size:11px; color:#8A6A93;">🟢 네이버</label>
               <input type="text" name="naver" value="${escapeHtml(getDisclosureTexts(myUserData).naver)}">
             </div>
             <div>
-              <label style="font-size:11px; color:#9083ab;">💄 올리브영</label>
+              <label style="font-size:11px; color:#8A6A93;">💄 올리브영</label>
               <input type="text" name="olive" value="${escapeHtml(getDisclosureTexts(myUserData).olive)}">
             </div>
           </div>
@@ -1844,34 +1820,34 @@ app.get('/admin', (req, res) => {
         </form>
 
         ${!isAdmin ? `
-        <div style="height:1px; background:rgba(124,72,235,0.15); margin:18px 0 14px;"></div>
+        <div style="height:1px; background:rgba(255,111,181,0.18); margin:18px 0 14px;"></div>
         <div class="eyebrow" style="margin-bottom:8px;">🔐 내 쿠팡 API 키 (2차 비밀번호로만 열람/변경 가능)</div>
-        <p style="font-size:11px; color:#9083ab; margin-bottom:10px;">등록해두면 검색·자동변환에는 비밀번호 입력 없이 바로 쓰여요. 다만 이 키를 다시 눈으로 "확인"하려면 2차 비밀번호가 필요하고, 관리자를 포함해 아무도 화면에서 직접 볼 수는 없어요.</p>
+        <p style="font-size:11px; color:#8A6A93; margin-bottom:10px;">등록해두면 검색·자동변환에는 비밀번호 입력 없이 바로 쓰여요. 다만 이 키를 다시 눈으로 "확인"하려면 2차 비밀번호가 필요하고, 관리자를 포함해 아무도 화면에서 직접 볼 수는 없어요.</p>
         <div style="display:flex; gap:16px; flex-wrap:wrap;">
           <div style="flex:1; min-width:220px;">
-            <div style="font-size:11px; color:#7a92a8; margin-bottom:6px;">${myUserData.coupangKeyBlob ? '✔ 키가 등록되어 있어요' : '아직 등록된 키가 없어요'}</div>
+            <div style="font-size:11px; color:#8A6A93; margin-bottom:6px;">${myUserData.coupangKeyBlob ? '✔ 키가 등록되어 있어요' : '아직 등록된 키가 없어요'}</div>
             <input type="text" id="coupangAccessKeyInput" placeholder="Access Key">
             <input type="text" id="coupangSecretKeyInput" placeholder="Secret Key">
             <input type="password" id="coupangSecondPwSave" placeholder="2차 비밀번호 (새로 정하거나 기존 것 입력)" autocomplete="new-password">
             <button type="button" class="btn-ghost" style="width:100%;" onclick="saveCoupangKeys()">저장 (암호화됨)</button>
           </div>
           <div style="flex:1; min-width:220px;">
-            <div style="font-size:11px; color:#7a92a8; margin-bottom:6px;">등록된 키 확인하기</div>
+            <div style="font-size:11px; color:#8A6A93; margin-bottom:6px;">등록된 키 확인하기</div>
             <input type="password" id="coupangSecondPwUnlock" placeholder="2차 비밀번호" autocomplete="new-password">
             <button type="button" class="btn-ghost" style="width:100%; margin-bottom:10px;" onclick="unlockCoupangKeys()">잠금 해제하고 보기</button>
             <button type="button" class="btn-ghost" style="width:100%; margin-bottom:10px;" onclick="validateCoupangKeys()">🩺 키 상태 확인</button>
-            <div id="coupangUnlockResult" class="yellow-emph" style="font-size:11px; color:#FFE600; word-break:break-all;"></div>
+            <div id="coupangUnlockResult" class="yellow-emph" style="font-size:11px; color:#E0A200; word-break:break-all;"></div>
           </div>
         </div>
         ` : ''}
       </div>
 
-      <button type="button" id="scrollTopBtn" onclick="window.scrollTo({top:0, behavior:'smooth'});" title="맨 위로" style="display:none; position:fixed; bottom:24px; right:24px; width:46px; height:46px; border-radius:50%; background:linear-gradient(135deg, #FF5A7A, #7c48eb); border:none; color:#fff; font-size:18px; cursor:pointer; box-shadow:0 6px 18px rgba(0,0,0,0.35); z-index:900;">↑</button>
+      <button type="button" id="scrollTopBtn" onclick="window.scrollTo({top:0, behavior:'smooth'});" title="맨 위로" style="display:none; position:fixed; bottom:24px; right:24px; width:46px; height:46px; border-radius:50%; background:linear-gradient(135deg, #FF6FB5, #B084F5); border:none; color:#fff; font-size:18px; cursor:pointer; box-shadow:0 8px 20px rgba(255,111,181,0.4); z-index:900;">↑</button>
 
-      <div id="guideModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(2,4,8,0.7); z-index:1000; align-items:center; justify-content:center;">
+      <div id="guideModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(255,240,247,0.7); z-index:1000; align-items:center; justify-content:center;">
         <div class="glass" style="padding:28px; max-width:560px; width:90%; max-height:80vh; overflow-y:auto;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-            <div class="eyebrow cute" style="font-size:16px;">📖 쇼핑 레이더 사용 설명서</div>
+            <div class="eyebrow cute" style="font-size:16px;">📖 반짝딜 사용 설명서</div>
             <button type="button" class="btn-ghost" onclick="document.getElementById('guideModal').style.display='none';">닫기</button>
           </div>
           ${renderFeatureGuideHtml()}
@@ -1886,10 +1862,10 @@ app.get('/admin', (req, res) => {
       <div class="grand-box total-box glass">
         <div style="display:flex; gap:28px; align-items:flex-start; flex-wrap:wrap;">
           <div style="flex:2 1 420px; min-width:0;">
-            <div class="eyebrow cute" style="font-size:16px; margin-bottom:2px;">전체 종합 레이더</div>
-            <div class="eyebrow" style="margin-bottom:4px;">🌐 ALL PLATFORMS</div>
+            <div class="eyebrow cute" style="font-size:16px; margin-bottom:2px;">전체 종합 현황</div>
+            <div class="eyebrow" style="margin-bottom:4px;">🌐 전체 플랫폼</div>
             <div class="total-num mono" id="num_all" style="font-size:56px;">${totalTodayAll}</div>
-            <div class="total-label">TODAY CLICKS · 쿠팡 + 토스 + 네이버 + 올리브영, 중복 IP 제외</div>
+            <div class="total-label">오늘 클릭 · 쿠팡 + 토스 + 네이버 + 올리브영, 중복 IP 제외</div>
             <div class="chart-controls">
               <button class="range-btn active" data-range="30" data-target="chart_total_all">1개월</button>
               <button class="range-btn" data-range="60" data-target="chart_total_all">2개월</button>
@@ -1899,7 +1875,7 @@ app.get('/admin', (req, res) => {
             <div style="height:120px; position:relative;"><canvas id="chart_total_all" class="agg-chart"></canvas></div>
             <script>window.__data_chart_total_all = ${JSON.stringify(totalDailyAll)};</script>
           </div>
-          <div style="flex:1 1 280px; min-width:0; border-left:1px solid rgba(124,72,235,0.2); padding-left:24px;">
+          <div style="flex:1 1 280px; min-width:0; border-left:1px solid rgba(255,111,181,0.2); padding-left:24px;">
             <div class="eyebrow cute" style="font-size:14px; margin-bottom:8px;">🗓️ 날짜별 방문 합계 조회</div>
             <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px;">
               <button type="button" class="btn-ghost" onclick="calMoveMonth(-1)" style="padding:4px 10px;">◀</button>
@@ -1921,17 +1897,17 @@ app.get('/admin', (req, res) => {
       <div class="top-row">
         ${(() => {
           const labels = {
-            coupang: ['쿠팡 레이더', 'COUPANG', '🚀'],
-            toss: ['토스 레이더', 'TOSS', '💳'],
-            naver: ['네이버 레이더', 'NAVER', '🟢'],
-            olive: ['올리브영 레이더', 'OLIVE YOUNG', '💄']
+            coupang: ['쿠팡 현황', '쿠팡', '🚀'],
+            toss: ['토스 현황', '토스', '💳'],
+            naver: ['네이버 현황', '네이버', '🟢'],
+            olive: ['올리브영 현황', '올리브영', '💄']
           };
           return platforms.map((p) => `
             <div class="total-box glass">
               <div class="eyebrow cute" style="font-size:14px; margin-bottom:2px;">${labels[p][0]}</div>
               <div class="eyebrow" style="margin-bottom:4px;">${labels[p][2]} ${labels[p][1]}</div>
               <div class="total-num mono" id="num_${p}">${totalToday[p]}</div>
-              <div class="total-label">TODAY CLICKS · 중복 IP 제외</div>
+              <div class="total-label">오늘 클릭 · 중복 IP 제외</div>
               <div class="chart-controls">
                 <button class="range-btn active" data-range="30" data-target="chart_total_${p}">1개월</button>
                 <button class="range-btn" data-range="60" data-target="chart_total_${p}">2개월</button>
@@ -1946,7 +1922,7 @@ app.get('/admin', (req, res) => {
       </div>
 
       <div class="form-box glass" style="margin-bottom:32px;">
-        <div class="eyebrow" style="margin-bottom:14px;">🔗 NEW_LINK.exe</div>
+        <div class="eyebrow" style="margin-bottom:14px;">🔗 새 링크 만들기</div>
         <form method="POST" action="/admin/create">
           <input type="text" name="code" id="codeInput" placeholder="짧은 코드 (예: test1)" required onblur="checkDuplicateCode()">
           <div style="display:flex; gap:8px; margin-bottom:4px;">
@@ -1961,7 +1937,7 @@ app.get('/admin', (req, res) => {
               <input type="text" name="description" placeholder="설명 (선택)">
               <input type="text" name="image" id="createImageInput" placeholder="이미지 주소 (선택, https://...)" oninput="updateCreatePreview()">
             </div>
-            <img id="createImagePreview" style="width:160px; height:130px; object-fit:cover; border-radius:12px; display:none; background:#07030f; border:1px solid rgba(124,72,235,0.24); flex-shrink:0;" onerror="this.style.display='none';" onload="this.style.display='block';">
+            <img id="createImagePreview" style="width:160px; height:130px; object-fit:cover; border-radius:16px; display:none; background:#FFF5FA; border:1px solid rgba(255,111,181,0.24); flex-shrink:0;" onerror="this.style.display='none';" onload="this.style.display='block';">
           </div>
           <div style="display:flex; gap:8px;">
             <select id="categorySelectNew" onchange="onCategorySelectChange(this, 'categoryCustomNew')" style="flex:1;">${categoryOptionsHtml('')}</select>
@@ -1988,10 +1964,10 @@ app.get('/admin', (req, res) => {
         </form>
       </div>
 
-      <div id="searchModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:1000; align-items:center; justify-content:center;">
+      <div id="searchModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(255,240,247,0.7); z-index:1000; align-items:center; justify-content:center;">
         <div class="glass" style="padding:26px; max-width:480px; width:90%; max-height:80vh; overflow-y:auto;">
-          <div class="eyebrow">🔍 PRODUCT_SEARCH</div>
-          <h3 style="margin:6px 0 16px; color:#FFFFFF;">상품 검색</h3>
+          <div class="eyebrow">🔍 상품 검색</div>
+          <h3 style="margin:6px 0 16px; color:#4A2545;">상품 검색</h3>
           <div style="display:flex; gap:8px; margin-bottom:16px;">
             <input type="text" id="searchKeyword" placeholder="상품 이름 입력" style="flex:1; margin-bottom:0;">
             <button onclick="doSearch()" class="btn-primary" style="white-space:nowrap;">검색</button>
@@ -2005,7 +1981,7 @@ app.get('/admin', (req, res) => {
         <div class="eyebrow cute" style="font-size:14px; margin-bottom:10px;">🆚 상품 비교</div>
         <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
           <select id="compareA" class="cmp-select"></select>
-          <span style="color:#7a92a8; font-size:12px;">VS</span>
+          <span style="color:#8A6A93; font-size:12px;">VS</span>
           <select id="compareB" class="cmp-select"></select>
           <button type="button" class="btn-ghost" onclick="runCompare()">비교하기</button>
         </div>
@@ -2015,7 +1991,7 @@ app.get('/admin', (req, res) => {
       ${isAdmin ? `
       <div class="glass" style="padding:18px 22px; margin-bottom:20px;">
         <div class="eyebrow cute" style="font-size:14px; margin-bottom:10px;">🎟️ 초대 코드 관리 (관리자 전용)</div>
-        <p style="font-size:11px; color:#9083ab; margin-bottom:12px;">여기서 만든 코드는 딱 한 번만 가입에 쓸 수 있고, 정해둔 기간이 지나면 자동으로 무효화돼요.</p>
+        <p style="font-size:11px; color:#8A6A93; margin-bottom:12px;">여기서 만든 코드는 딱 한 번만 가입에 쓸 수 있고, 정해둔 기간이 지나면 자동으로 무효화돼요.</p>
         <form method="POST" action="/admin/invites/create" style="margin-bottom:14px; display:flex; gap:8px; align-items:center;">
           <select name="validDays" style="width:140px;">
             <option value="3">3일 동안 유효</option>
@@ -2030,27 +2006,27 @@ app.get('/admin', (req, res) => {
             const expired = !inv.used && isInviteExpired(inv);
             const status = inv.used ? '✔ 사용됨 (' + escapeHtml(inv.usedBy) + ')' : (expired ? '⌛ 기간만료' : `⏳ ~${escapeHtml(inv.validUntil || '무제한')}까지`);
             return `
-            <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid rgba(124,72,235,0.1); font-size:12px;">
-              <span class="mono invite-code" style="color:${(inv.used || expired) ? '#7a92a8' : '#FFE600'};">${escapeHtml(inv.code)}</span>
-              <span style="color:${expired ? '#ff3860' : '#9083ab'}; font-size:11px;">${status}</span>
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid rgba(255,111,181,0.12); font-size:12px;">
+              <span class="mono invite-code" style="color:${(inv.used || expired) ? '#8A6A93' : '#E0A200'};">${escapeHtml(inv.code)}</span>
+              <span style="color:${expired ? '#ff3860' : '#8A6A93'}; font-size:11px;">${status}</span>
             </div>
-          `; }).join('') || '<div style="font-size:12px; color:#7a92a8;">아직 발급한 코드가 없어요</div>'}
+          `; }).join('') || '<div style="font-size:12px; color:#8A6A93;">아직 발급한 코드가 없어요</div>'}
         </div>
       </div>
 
       <div class="glass" style="padding:18px 22px; margin-bottom:20px;">
         <div class="eyebrow cute" style="font-size:14px; margin-bottom:10px;">📊 사용자 통계 요약</div>
         <div style="display:flex; gap:24px; flex-wrap:wrap;">
-          <div><div style="font-size:22px; font-weight:900; color:#FFE600;">${nonAdminUsernames.length}</div><div style="font-size:10px; color:#9083ab;">전체 사용자</div></div>
-          <div><div style="font-size:22px; font-weight:900; color:#6EE7B7;">${newThisMonthCount}</div><div style="font-size:10px; color:#9083ab;">이번 달 신규가입</div></div>
-          <div><div style="font-size:22px; font-weight:900; color:${expiringSoonUsers.length ? '#ff3860' : '#7a92a8'};">${expiringSoonUsers.length}</div><div style="font-size:10px; color:#9083ab;">곧 만료(3일 이내)</div></div>
+          <div><div style="font-size:22px; font-weight:800; color:#E0A200;">${nonAdminUsernames.length}</div><div style="font-size:10px; color:#8A6A93;">전체 사용자</div></div>
+          <div><div style="font-size:22px; font-weight:800; color:#3FBFA6;">${newThisMonthCount}</div><div style="font-size:10px; color:#8A6A93;">이번 달 신규가입</div></div>
+          <div><div style="font-size:22px; font-weight:800; color:${expiringSoonUsers.length ? '#ff3860' : '#8A6A93'};">${expiringSoonUsers.length}</div><div style="font-size:10px; color:#8A6A93;">곧 만료(3일 이내)</div></div>
         </div>
       </div>
 
       ${expiringSoonUsers.length ? `
       <div class="glass" style="padding:14px 22px; margin-bottom:20px; border-color:rgba(255,56,96,0.4);">
         <span style="font-size:12px; color:#ff3860; font-weight:700;">⚠️ 곧 만료되는 사용자:</span>
-        <span style="font-size:12px; color:#e8fbff;">
+        <span style="font-size:12px; color:#4A2545;">
           ${expiringSoonUsers.map((u) => `${escapeHtml(u)}(${isSubscriptionExpired(allUsersData[u]) ? '만료됨' : 'D-' + Math.ceil((new Date(allUsersData[u].subscriptionExpiresAt) - new Date(getTodayKST())) / 86400000)})`).join(', ')}
         </span>
       </div>
@@ -2063,7 +2039,7 @@ app.get('/admin', (req, res) => {
             <input type="text" name="username" placeholder="새 아이디" required autocomplete="off">
             <input type="password" name="password" placeholder="비밀번호" required autocomplete="new-password">
             <input type="email" name="email" placeholder="이메일 (선택)" autocomplete="off">
-            <label style="font-size:12px; color:#9083ab; display:flex; align-items:center; gap:6px; margin-bottom:12px;">
+            <label style="font-size:12px; color:#8A6A93; display:flex; align-items:center; gap:6px; margin-bottom:12px;">
               <input type="checkbox" name="isAdmin" style="width:auto; margin:0;"> 관리자 권한 부여 (전체 링크 열람 가능)
             </label>
             <button type="submit" class="btn-ghost" style="width:100%;">계정 추가</button>
@@ -2074,7 +2050,7 @@ app.get('/admin', (req, res) => {
             </div>
             <form method="POST" action="/admin/users/bulk-extend" id="bulkExtendForm" style="margin-bottom:8px;">
               <button type="submit" class="btn-ghost" style="font-size:11px; padding:6px 10px;" onclick="return confirm('선택한 사용자들의 이용기간을 오늘로부터 1개월 연장할까요?');">✅ 선택한 사용자 1개월 일괄 연장</button>
-              <span id="bulkSelectedCount" style="font-size:10px; color:#9083ab; margin-left:6px;">0명 선택됨</span>
+              <span id="bulkSelectedCount" style="font-size:10px; color:#8A6A93; margin-left:6px;">0명 선택됨</span>
               <div id="userListContainer" style="max-height:320px; overflow-y:auto; padding-right:4px; margin-top:8px;">
                 ${Object.keys(allUsersData).map((u) => {
                   const ud = allUsersData[u];
@@ -2082,31 +2058,31 @@ app.get('/admin', (req, res) => {
                     : (ud.subscriptionType === 'lifetime' ? '♾️ 평생'
                       : `📅~${ud.subscriptionExpiresAt || '미설정'}${isSubscriptionExpired(ud) ? ' <span style="color:#ff3860;">(만료)</span>' : ''}`);
                   return `
-                  <div class="user-row" data-username="${escapeHtml(u.toLowerCase())}" style="display:flex; align-items:center; gap:6px; padding:6px 0; border-bottom:1px solid rgba(124,72,235,0.12); font-size:12px; flex-wrap:nowrap; overflow-x:auto;">
+                  <div class="user-row" data-username="${escapeHtml(u.toLowerCase())}" style="display:flex; align-items:center; gap:6px; padding:6px 0; border-bottom:1px solid rgba(255,111,181,0.14); font-size:12px; flex-wrap:nowrap; overflow-x:auto;">
                     ${!ud.isAdmin ? `<input type="checkbox" name="usernames" value="${escapeHtml(u)}" form="bulkExtendForm" class="bulk-check" onchange="updateBulkCount()" style="width:auto; margin:0; flex-shrink:0;">` : '<span style="width:14px; flex-shrink:0;"></span>'}
-                    <a href="/admin?viewUser=${encodeURIComponent(u)}" style="flex:0 0 auto; max-width:80px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#3d5afe; text-decoration:none;" title="이 사용자의 링크 보기">${escapeHtml(u)}${ud.isAdmin ? ' 👑' : ''}</a>
+                    <a href="/admin?viewUser=${encodeURIComponent(u)}" style="flex:0 0 auto; max-width:80px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#B84FD6; text-decoration:none;" title="이 사용자의 링크 보기">${escapeHtml(u)}${ud.isAdmin ? ' 👑' : ''}</a>
                     ${u !== currentUser ? `
                     <form method="POST" action="/admin/users/reset-password" onsubmit="return confirm('${escapeHtml(u)} 계정 비밀번호를 123456으로 초기화할까요?');" style="margin:0; flex-shrink:0;">
                       <input type="hidden" name="username" value="${escapeHtml(u)}">
-                      <button type="submit" style="background:none; border:1px solid rgba(61,90,254,0.3); color:#3d5afe; font-size:9px; cursor:pointer; border-radius:6px; padding:3px 5px; white-space:nowrap;">비번초기화</button>
+                      <button type="submit" style="background:none; border:1px solid rgba(176,132,245,0.3); color:#8A4FE0; font-size:9px; cursor:pointer; border-radius:6px; padding:3px 5px; white-space:nowrap;">비번초기화</button>
                     </form>
                     <form method="POST" action="/admin/users/delete" onsubmit="return confirm('${escapeHtml(u)} 계정을 삭제할까요? 이 계정이 만든 링크는 그대로 남아있어요.');" style="margin:0; flex-shrink:0;">
                       <input type="hidden" name="username" value="${escapeHtml(u)}">
                       <button type="submit" style="background:none; border:none; color:#ff3860; font-size:10px; cursor:pointer; white-space:nowrap;">삭제</button>
-                    </form>` : '<span style="font-size:10px; color:#7a92a8; flex-shrink:0;">나</span>'}
+                    </form>` : '<span style="font-size:10px; color:#8A6A93; flex-shrink:0;">나</span>'}
                     ${!ud.isAdmin ? `
-                    <span style="font-size:9px; color:#9083ab; flex-shrink:0; white-space:nowrap;">${subLabel}</span>
+                    <span style="font-size:9px; color:#8A6A93; flex-shrink:0; white-space:nowrap;">${subLabel}</span>
                     <form method="POST" action="/admin/users/set-subscription" style="display:flex; align-items:center; gap:3px; margin:0; flex-shrink:0;">
                       <input type="hidden" name="username" value="${escapeHtml(u)}">
                       <button type="submit" name="type" value="lifetime" class="sub-btn ${ud.subscriptionType === 'lifetime' ? 'active' : ''}" style="white-space:nowrap;">평생</button>
-                      <span style="font-size:9px; color:#9083ab; flex-shrink:0; white-space:nowrap;">만료일</span>
+                      <span style="font-size:9px; color:#8A6A93; flex-shrink:0; white-space:nowrap;">만료일</span>
                       <input type="date" name="expiresAt" value="${escapeHtml(ud.subscriptionExpiresAt || '')}" style="width:118px; margin:0; padding:3px 5px; font-size:9px;">
                       <button type="submit" name="type" value="period" class="sub-btn ${ud.subscriptionType === 'period' ? 'active' : ''}" style="white-space:nowrap;">기간설정</button>
                     </form>
                     <form method="POST" action="/admin/users/set-note" style="display:flex; align-items:center; gap:3px; margin:0 0 0 auto; flex-shrink:0;">
                       <input type="hidden" name="username" value="${escapeHtml(u)}">
                       <input type="text" name="note" value="${escapeHtml(ud.adminNote || '')}" placeholder="메모" style="width:70px; margin:0; padding:3px 5px; font-size:9px;">
-                      <button type="submit" style="background:none; border:1px solid rgba(110,231,183,0.3); color:#6EE7B7; font-size:9px; cursor:pointer; border-radius:6px; padding:3px 5px; white-space:nowrap;">저장</button>
+                      <button type="submit" style="background:none; border:1px solid rgba(63,191,166,0.3); color:#3FBFA6; font-size:9px; cursor:pointer; border-radius:6px; padding:3px 5px; white-space:nowrap;">저장</button>
                     </form>
                     ` : ''}
                   </div>
@@ -2116,7 +2092,7 @@ app.get('/admin', (req, res) => {
           </div>
         </div>
 
-        <div style="height:1px; background:rgba(124,72,235,0.15); margin:18px 0 14px;"></div>
+        <div style="height:1px; background:rgba(255,111,181,0.18); margin:18px 0 14px;"></div>
         <div id="personalInfoGate">
           <div class="eyebrow" style="margin-bottom:8px;">🔒 개인정보 (이메일·추천인) — 관리자 비밀번호 재확인 필요</div>
           <div style="display:flex; gap:8px; flex-wrap:wrap;">
@@ -2131,12 +2107,12 @@ app.get('/admin', (req, res) => {
         <div class="eyebrow cute" style="font-size:14px; margin-bottom:10px;">📜 최근 활동 로그</div>
         <div style="max-height:220px; overflow-y:auto;">
           ${loadActivityLog().slice(0, 30).map((a) => `
-            <div style="font-size:11px; color:#9083ab; padding:5px 0; border-bottom:1px solid rgba(124,72,235,0.08);">
-              <span style="color:#7a92a8;">${escapeHtml(a.time)}</span> ·
-              <span style="color:#3d5afe;">${escapeHtml(a.user)}</span> ·
+            <div style="font-size:11px; color:#8A6A93; padding:5px 0; border-bottom:1px solid rgba(255,111,181,0.1);">
+              <span style="color:#8A6A93;">${escapeHtml(a.time)}</span> ·
+              <span style="color:#B84FD6;">${escapeHtml(a.user)}</span> ·
               ${escapeHtml(a.action)} ${a.detail ? '(' + escapeHtml(a.detail) + ')' : ''}
             </div>
-          `).join('') || '<div style="font-size:12px; color:#7a92a8;">아직 기록이 없어요</div>'}
+          `).join('') || '<div style="font-size:12px; color:#8A6A93;">아직 기록이 없어요</div>'}
         </div>
       </div>
       ` : ''}
@@ -2170,12 +2146,12 @@ app.get('/admin', (req, res) => {
           <div class="eyebrow cute" style="font-size:14px; margin-bottom:10px;">🧪 A/B 테스트 결과</div>
           ${groupNames.map((g) => `
             <div style="margin-bottom:12px;">
-              <div style="font-size:12px; color:#9083ab; margin-bottom:6px;">그룹: ${escapeHtml(g)}</div>
+              <div style="font-size:12px; color:#8A6A93; margin-bottom:6px;">그룹: ${escapeHtml(g)}</div>
               <div style="display:flex; gap:10px; flex-wrap:wrap;">
                 ${abGroups[g].map((v) => `
-                  <div style="flex:1; min-width:160px; background:rgba(4,7,13,0.5); border-radius:10px; padding:10px;">
-                    <div style="font-size:11px; color:#FF5A7A; font-weight:800; margin-bottom:4px;">${escapeHtml(v.abVariant || '?')}안 · ${escapeHtml(v.title || v.code)}</div>
-                    <div class="yellow-emph" style="font-size:11px; color:#FFE600;">오늘 ${v.todayClicks}회 · 누적 ${v.totalAllTime}회</div>
+                  <div style="flex:1; min-width:160px; background:rgba(255,111,181,0.06); border-radius:14px; padding:10px;">
+                    <div style="font-size:11px; color:#E0399B; font-weight:800; margin-bottom:4px;">${escapeHtml(v.abVariant || '?')}안 · ${escapeHtml(v.title || v.code)}</div>
+                    <div class="yellow-emph" style="font-size:11px; color:#E0A200;">오늘 ${v.todayClicks}회 · 누적 ${v.totalAllTime}회</div>
                   </div>
                 `).join('')}
               </div>
@@ -2186,7 +2162,6 @@ app.get('/admin', (req, res) => {
       })()}
 
       <div style="display:flex; gap:8px; margin-bottom:16px;">
-        <button type="button" class="btn-ghost" onclick="toggleTheme()">🌗 테마 전환</button>
         <button type="button" class="btn-ghost" onclick="downloadReportImage()">🖼️ 이번 주 리포트 이미지</button>
       </div>
 
@@ -2307,13 +2282,13 @@ app.get('/admin', (req, res) => {
           resultsDiv.innerHTML = data.products.map((p, i) => {
             const unitPrice = estimateUnitPrice(p.productName, p.productPrice);
             return \`
-            <div style="display:flex; align-items:center; gap:14px; padding:12px; border-bottom:1px solid rgba(61,90,254,0.2); cursor:pointer;" onclick="selectProduct(\${i})">
-              <img src="\${p.productImage}" style="width:64px; height:64px; object-fit:cover; border-radius:10px; flex-shrink:0; background:#07030f; border:1px solid rgba(61,90,254,0.28);">
+            <div style="display:flex; align-items:center; gap:14px; padding:12px; border-bottom:1px solid rgba(255,111,181,0.16); cursor:pointer;" onclick="selectProduct(\${i})">
+              <img src="\${p.productImage}" style="width:64px; height:64px; object-fit:cover; border-radius:14px; flex-shrink:0; background:#FFF5FA; border:1px solid rgba(255,111,181,0.24);">
               <div style="flex:1; min-width:0;">
-                <div style="font-size:13px; color:#FFFFFF; line-height:1.4;">\${p.productName}</div>
+                <div style="font-size:13px; color:#4A2545; line-height:1.4;">\${p.productName}</div>
               </div>
               <div style="text-align:right; white-space:nowrap;">
-                <div style="font-size:15px; font-weight:900; color:#7c48eb;">\${Number(p.productPrice).toLocaleString()}원</div>
+                <div style="font-size:15px; font-weight:800; color:#E0399B;">\${Number(p.productPrice).toLocaleString()}원</div>
                 \${unitPrice ? \`<div class="unit-price">\${unitPrice}</div>\` : ''}
               </div>
             </div>
@@ -2386,10 +2361,10 @@ app.get('/admin', (req, res) => {
 
         const baseRadius = labels.length > 40 ? 0 : 3;
         let pointRadii = values.map(() => baseRadius);
-        let pointColors = values.map(() => '#7c48eb');
+        let pointColors = values.map(() => '#FF6FB5');
 
-        const NEON_MAX = '#FF2FD4';
-        const NEON_MIN = '#39FFEA';
+        const PEAK_MAX = '#FF2E9A';
+        const PEAK_MIN = '#8A4FE0';
         let maxIdx = -1, minIdx = -1, maxVal = 0, minVal = 0;
 
         if (isAgg && values.length) {
@@ -2397,11 +2372,11 @@ app.get('/admin', (req, res) => {
           minVal = Math.min(...values);
           maxIdx = values.lastIndexOf(maxVal);
           minIdx = values.indexOf(minVal);
-          if (maxVal > 0) pointColors[maxIdx] = NEON_MAX;
-          if (maxVal !== minVal) pointColors[minIdx] = NEON_MIN;
+          if (maxVal > 0) pointColors[maxIdx] = PEAK_MAX;
+          if (maxVal !== minVal) pointColors[minIdx] = PEAK_MIN;
         }
 
-        // 종합 그래프의 최고/최저점 위에 숫자를 네온 글로우로 표시해주는 커스텀 플러그인
+        // 종합 그래프의 최고/최저점 위에 숫자를 표시해주는 커스텀 플러그인
         const extremaLabelPlugin = {
           id: 'extremaLabel_' + chartId,
           afterDatasetsDraw(chart) {
@@ -2413,8 +2388,6 @@ app.get('/admin', (req, res) => {
             function drawLabel(pt, text, color) {
               c.save();
               c.font = 'bold 11px sans-serif';
-              c.shadowColor = color;
-              c.shadowBlur = 10;
               c.fillStyle = color;
               const edgeGap = 26; // 이 거리보다 끝에 가까우면 정렬을 바꿔줌
               let align = 'center';
@@ -2433,10 +2406,10 @@ app.get('/admin', (req, res) => {
             }
 
             if (maxVal > 0 && meta.data[maxIdx]) {
-              drawLabel(meta.data[maxIdx], String(maxVal), NEON_MAX);
+              drawLabel(meta.data[maxIdx], String(maxVal), PEAK_MAX);
             }
             if (maxVal !== minVal && meta.data[minIdx]) {
-              drawLabel(meta.data[minIdx], String(minVal), NEON_MIN);
+              drawLabel(meta.data[minIdx], String(minVal), PEAK_MIN);
             }
           }
         };
@@ -2449,8 +2422,8 @@ app.get('/admin', (req, res) => {
             datasets: [{
               label: '클릭 수',
               data: values,
-              borderColor: '#7c48eb',
-              backgroundColor: 'rgba(124,72,235,0.22)',
+              borderColor: '#FF6FB5',
+              backgroundColor: 'rgba(255,111,181,0.18)',
               fill: true,
               tension: 0.3,
               pointRadius: pointRadii,
@@ -2474,8 +2447,8 @@ app.get('/admin', (req, res) => {
               }
             },
             scales: {
-              x: { ticks: { maxTicksLimit: 8, color: '#7a92a8' }, grid: { color: 'rgba(61,90,254,0.18)' } },
-              y: { beginAtZero: true, ticks: { precision: 0, color: '#7a92a8' }, grid: { color: 'rgba(61,90,254,0.18)' } }
+              x: { ticks: { maxTicksLimit: 8, color: '#8A6A93' }, grid: { color: 'rgba(255,111,181,0.12)' } },
+              y: { beginAtZero: true, ticks: { precision: 0, color: '#8A6A93' }, grid: { color: 'rgba(255,111,181,0.12)' } }
             }
           }
         });
@@ -2494,12 +2467,12 @@ app.get('/admin', (req, res) => {
               labels: dates.map((d) => d.slice(5)),
               datasets: [{
                 data: values,
-                borderColor: '#FFE600',
-                backgroundColor: 'rgba(255,230,0,0.12)',
+                borderColor: '#E0A200',
+                backgroundColor: 'rgba(224,162,0,0.12)',
                 fill: true,
                 tension: 0.25,
                 pointRadius: 2,
-                pointBackgroundColor: '#FFE600'
+                pointBackgroundColor: '#E0A200'
               }]
             },
             options: {
@@ -2578,16 +2551,16 @@ app.get('/admin', (req, res) => {
         if (!a || !b) { box.innerHTML = ''; return; }
         const platformIconsCmp = { coupang: '🚀', toss: '💳', naver: '🟢', olive: '💄' };
         function row(label, va, vb) {
-          const aWin = va > vb ? 'color:#3d5afe; font-weight:800;' : 'color:#7a92a8;';
-          const bWin = vb > va ? 'color:#3d5afe; font-weight:800;' : 'color:#7a92a8;';
-          return '<div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid rgba(124,72,235,0.1); font-size:12px;">' +
+          const aWin = va > vb ? 'color:#E0399B; font-weight:800;' : 'color:#8A6A93;';
+          const bWin = vb > va ? 'color:#E0399B; font-weight:800;' : 'color:#8A6A93;';
+          return '<div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid rgba(255,111,181,0.12); font-size:12px;">' +
             '<span style="' + aWin + '">' + va + '</span>' +
-            '<span style="color:#7a92a8;">' + label + '</span>' +
+            '<span style="color:#8A6A93;">' + label + '</span>' +
             '<span style="' + bWin + '">' + vb + '</span>' +
           '</div>';
         }
         box.innerHTML =
-          '<div style="display:flex; justify-content:space-between; font-size:12px; font-weight:700; color:#FFFFFF; margin-bottom:6px;">' +
+          '<div style="display:flex; justify-content:space-between; font-size:12px; font-weight:700; color:#4A2545; margin-bottom:6px;">' +
             '<span>' + platformIconsCmp[a.platform] + ' ' + a.title + '</span>' +
             '<span>' + platformIconsCmp[b.platform] + ' ' + b.title + '</span>' +
           '</div>' +
@@ -2795,7 +2768,7 @@ app.get('/admin', (req, res) => {
         if (soundOn) {
           ensureAudioCtx();
           requestNotifyPermission();
-          btn.textContent = '🔊 SOUND ON';
+          btn.textContent = '🔊 소리 켜짐';
           playTone(880, 0, 0.15, 'square', 0.12);
           playTone(1320, 0.12, 0.2, 'square', 0.1);
           if (ytPlayer && ytPlayer.playVideo) {
@@ -2806,7 +2779,7 @@ app.get('/admin', (req, res) => {
           checkMilestones();
           checkPriceDrops();
         } else {
-          btn.textContent = '🔇 SOUND OFF';
+          btn.textContent = '🔇 소리 끄기';
           if (ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo();
         }
       }
@@ -2824,16 +2797,16 @@ app.get('/admin', (req, res) => {
       const platformIcons2 = { coupang: '🚀', toss: '💳', naver: '🟢', olive: '💄' };
 
       function buildRankingRowsClient(list, showPlatform) {
-        if (!list.length) return '<div style="font-size:12px; color:#7a92a8; padding:8px 0;">아직 클릭 기록이 없어요</div>';
+        if (!list.length) return '<div style="font-size:12px; color:#8A6A93; padding:8px 0;">아직 클릭 기록이 없어요</div>';
         const medals = ['🥇', '🥈', '🥉'];
         const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
         return list.map((item, i) => \`
-          <div style="display:flex; align-items:center; gap:10px; padding:8px 0; \${i < list.length - 1 ? 'border-bottom:1px solid rgba(124,72,235,0.12);' : ''}">
+          <div style="display:flex; align-items:center; gap:10px; padding:8px 0; \${i < list.length - 1 ? 'border-bottom:1px solid rgba(255,111,181,0.14);' : ''}">
             <div style="width:24px; font-size:14px; text-align:center; flex-shrink:0;">\${medals[i] || (i + 1)}</div>
-            <div class="rank-name" style="flex:1; min-width:0; font-size:12px; color:#FFFFFF; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+            <div class="rank-name" style="flex:1; min-width:0; font-size:12px; color:#4A2545; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
               \${showPlatform ? ('<span style="opacity:0.7;">' + platformIcons2[item.platform] + '</span> ') : ''}\${esc(item.title)}
             </div>
-            <div class="rank-amt" style="font-size:12px; font-weight:700; color:#FFE600; flex-shrink:0;">\${item.totalAllTime}회</div>
+            <div class="rank-amt" style="font-size:12px; font-weight:700; color:#E0A200; flex-shrink:0;">\${item.totalAllTime}회</div>
           </div>
         \`).join('');
       }
@@ -2876,7 +2849,7 @@ app.get('/admin', (req, res) => {
             if (!chartId) continue;
 
             const clicksEl = document.getElementById('clicks_' + chartId);
-            if (clicksEl) clicksEl.innerHTML = info.todayClicks + ' <span>CLICKS · TODAY</span>';
+            if (clicksEl) clicksEl.innerHTML = info.todayClicks + ' <span>오늘 클릭</span>';
             const cumEl = document.getElementById('cum_' + chartId);
             if (cumEl) cumEl.textContent = '누적 ' + info.totalAllTime + '회';
 
@@ -2973,15 +2946,6 @@ app.get('/admin', (req, res) => {
         } catch (e) {}
       }
 
-      // ===== 다크/라이트 테마 전환 =====
-      function toggleTheme() {
-        document.body.classList.toggle('light-theme');
-        localStorage.setItem('radar_theme', document.body.classList.contains('light-theme') ? 'light' : 'dark');
-      }
-      if (localStorage.getItem('radar_theme') === 'light') {
-        document.body.classList.add('light-theme');
-      }
-
       // ===== 주간 리포트 이미지 생성 =====
       function downloadReportImage() {
         const full = window.__linkFull || {};
@@ -2990,27 +2954,27 @@ app.get('/admin', (req, res) => {
         canvas.width = 600;
         canvas.height = 120 + items.length * 60;
         const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#0a0e24';
+        ctx.fillStyle = '#FFE9F5';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#FFFFFF';
+        ctx.fillStyle = '#4A2545';
         ctx.font = 'bold 26px sans-serif';
-        ctx.fillText('📡 쇼핑 레이더 - 인기 상품 리포트', 24, 46);
+        ctx.fillText('💗 반짝딜 - 인기 상품 리포트', 24, 46);
         ctx.font = '13px sans-serif';
-        ctx.fillStyle = '#9083ab';
+        ctx.fillStyle = '#8A6A93';
         ctx.fillText(new Date().toLocaleDateString('ko-KR'), 24, 70);
         items.forEach((it, i) => {
           const y = 110 + i * 60;
-          ctx.fillStyle = 'rgba(124,72,235,0.12)';
+          ctx.fillStyle = 'rgba(255,111,181,0.12)';
           ctx.fillRect(24, y, canvas.width - 48, 46);
-          ctx.fillStyle = '#FFFFFF';
+          ctx.fillStyle = '#4A2545';
           ctx.font = 'bold 15px sans-serif';
           ctx.fillText((i + 1) + '. ' + it.title, 40, y + 20);
-          ctx.fillStyle = '#FFE600';
+          ctx.fillStyle = '#E0A200';
           ctx.font = 'bold 14px sans-serif';
           ctx.fillText('누적 ' + it.total + '회 · 오늘 ' + it.today + '회', 40, y + 38);
         });
         const link = document.createElement('a');
-        link.download = 'shopping-radar-report.png';
+        link.download = 'sparkle-deal-report.png';
         link.href = canvas.toDataURL('image/png');
         link.click();
       }
@@ -3073,17 +3037,16 @@ app.get('/admin', (req, res) => {
           if (data.success) totals = data.totals;
         } catch (e) {}
 
-        const isLight = document.body.classList.contains('light-theme');
-        const numColor = isLight ? '#111111' : '#e8fbff';
-        const countColor = isLight ? '#7c48eb' : '#FFE600';
-        const todayBorder = isLight ? '1px solid #7c48eb' : '1px solid #FFE600';
+        const numColor = '#4A2545';
+        const countColor = '#E0A200';
+        const todayBorder = '1.5px solid #E0399B';
 
         const firstDay = new Date(Date.UTC(calYear, calMonth - 1, 1)).getUTCDay(); // 0=일
         const daysInMonth = new Date(Date.UTC(calYear, calMonth, 0)).getUTCDate();
         const grid = document.getElementById('calGrid');
         let html = '';
         ['일', '월', '화', '수', '목', '금', '토'].forEach((w) => {
-          html += '<div style="font-size:9px; color:#7a92a8; text-align:center;">' + w + '</div>';
+          html += '<div style="font-size:9px; color:#8A6A93; text-align:center;">' + w + '</div>';
         });
         for (let i = 0; i < firstDay; i++) html += '<div></div>';
         const todayStr = new Date(new Date().getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -3093,10 +3056,10 @@ app.get('/admin', (req, res) => {
           const isToday = dateStr === todayStr;
           const inRange = calRangeStart && calRangeEnd && dateStr >= calRangeStart && dateStr <= calRangeEnd;
           const isSelected = dateStr === calRangeStart || dateStr === calRangeEnd;
-          let bg = 'rgba(124,72,235,0.08)';
-          if (isSelected) bg = 'rgba(255,90,122,0.5)';
-          else if (inRange) bg = 'rgba(61,90,254,0.3)';
-          html += '<button type="button" onclick="calDayClick(\\'' + dateStr + '\\')" style="width:24px; height:24px; border-radius:6px; border:' + (isToday ? todayBorder : 'none') + '; background:' + bg + '; color:' + numColor + '; font-size:8px; cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:0;">' +
+          let bg = 'rgba(255,111,181,0.08)';
+          if (isSelected) bg = 'rgba(255,111,181,0.5)';
+          else if (inRange) bg = 'rgba(176,132,245,0.3)';
+          html += '<button type="button" onclick="calDayClick(\\'' + dateStr + '\\')" style="width:24px; height:24px; border-radius:8px; border:' + (isToday ? todayBorder : 'none') + '; background:' + bg + '; color:' + numColor + '; font-size:8px; cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:0;">' +
             '<span>' + d + '</span>' + (count > 0 ? '<span style="font-size:6px; color:' + countColor + ';">' + count + '</span>' : '') +
             '</button>';
         }
@@ -3139,28 +3102,28 @@ app.get('/admin', (req, res) => {
 
       function renderStatsSummary(prefixLabel, totalAll, totalByPlatform, topProducts) {
         const box = document.getElementById('statsDateResult');
-        let html = '<div class="rank-name" style="font-size:13px; margin-bottom:8px; display:inline-block;">' + prefixLabel + ' 전체 클릭: <span class="yellow-emph" style="color:#FFE600; font-weight:800;">' + totalAll + '</span></div>';
-        html += '<div style="display:flex; gap:14px; flex-wrap:wrap; margin-bottom:10px; font-size:11px; color:#9083ab;">';
+        let html = '<div class="rank-name" style="font-size:13px; margin-bottom:8px; display:inline-block;">' + prefixLabel + ' 전체 클릭: <span class="yellow-emph" style="color:#E0A200; font-weight:800;">' + totalAll + '</span></div>';
+        html += '<div style="display:flex; gap:14px; flex-wrap:wrap; margin-bottom:10px; font-size:11px; color:#8A6A93;">';
         ['coupang', 'toss', 'naver', 'olive'].forEach((pl) => {
           html += '<span>' + platformIconsCal[pl] + ' ' + totalByPlatform[pl] + '</span>';
         });
         html += '</div>';
         if (topProducts.length) {
-          html += '<div style="font-size:11px; color:#9083ab; margin-bottom:6px;">인기 상품</div>';
+          html += '<div style="font-size:11px; color:#8A6A93; margin-bottom:6px;">인기 상품</div>';
           topProducts.forEach((item, i) => {
-            html += '<div style="display:flex; justify-content:space-between; font-size:11px; padding:4px 0; border-bottom:1px solid rgba(124,72,235,0.08);">' +
+            html += '<div style="display:flex; justify-content:space-between; font-size:11px; padding:4px 0; border-bottom:1px solid rgba(255,111,181,0.1);">' +
               '<span class="rank-name">' + (i + 1) + '. ' + platformIconsCal[item.platform] + ' ' + item.title + '</span>' +
-              '<span class="yellow-emph" style="color:#FFE600;">' + item.clicks + '회</span></div>';
+              '<span class="yellow-emph" style="color:#E0A200;">' + item.clicks + '회</span></div>';
           });
         } else {
-          html += '<div style="font-size:11px; color:#7a92a8;">기록된 클릭이 없어요</div>';
+          html += '<div style="font-size:11px; color:#8A6A93;">기록된 클릭이 없어요</div>';
         }
         box.innerHTML = html;
       }
 
       async function loadStatsForDate(date) {
         const box = document.getElementById('statsDateResult');
-        box.innerHTML = '<div style="font-size:12px; color:#9083ab;">불러오는 중...</div>';
+        box.innerHTML = '<div style="font-size:12px; color:#8A6A93;">불러오는 중...</div>';
         try {
           const res = await fetch('/admin/api/stats-for-date?date=' + encodeURIComponent(date));
           const data = await res.json();
@@ -3173,7 +3136,7 @@ app.get('/admin', (req, res) => {
 
       async function loadStatsForRange(start, end) {
         const box = document.getElementById('statsDateResult');
-        box.innerHTML = '<div style="font-size:12px; color:#9083ab;">불러오는 중...</div>';
+        box.innerHTML = '<div style="font-size:12px; color:#8A6A93;">불러오는 중...</div>';
         try {
           const res = await fetch('/admin/api/stats-for-range?start=' + encodeURIComponent(start) + '&end=' + encodeURIComponent(end));
           const data = await res.json();
@@ -3213,9 +3176,9 @@ app.get('/admin', (req, res) => {
           const body = document.getElementById('personalInfoBody');
           const rows = Object.keys(data.details).map((u) => {
             const d = data.details[u];
-            return '<div style="display:flex; justify-content:space-between; font-size:11px; padding:5px 0; border-bottom:1px solid rgba(124,72,235,0.08);">' +
-              '<span style="color:#FFFFFF;">' + u + '</span>' +
-              '<span style="color:#9083ab;">이름: ' + d.realName + ' · 닉네임: ' + d.nickname + ' · ' + d.email + ' · 추천인코드: ' + d.referredBy + '</span>' +
+            return '<div style="display:flex; justify-content:space-between; font-size:11px; padding:5px 0; border-bottom:1px solid rgba(255,111,181,0.1);">' +
+              '<span style="color:#4A2545;">' + u + '</span>' +
+              '<span style="color:#8A6A93;">이름: ' + d.realName + ' · 닉네임: ' + d.nickname + ' · ' + d.email + ' · 추천인코드: ' + d.referredBy + '</span>' +
             '</div>';
           }).join('');
           body.innerHTML = rows;
@@ -3233,8 +3196,8 @@ app.get('/admin', (req, res) => {
           if (!data.success) { alert('시작 실패'); return; }
           const box = document.getElementById('totpSetupBox');
           box.innerHTML =
-            '<img src="' + data.qrUrl + '" style="width:140px; height:140px; border-radius:10px; background:#fff; padding:6px; margin-bottom:8px;">' +
-            '<div style="font-size:10px; color:#7a92a8; margin-bottom:8px; word-break:break-all;">시크릿: ' + data.secret + '</div>' +
+            '<img src="' + data.qrUrl + '" style="width:140px; height:140px; border-radius:14px; background:#fff; padding:6px; margin-bottom:8px;">' +
+            '<div style="font-size:10px; color:#8A6A93; margin-bottom:8px; word-break:break-all;">시크릿: ' + data.secret + '</div>' +
             '<input type="text" id="totpCodeInput" placeholder="앱에 뜬 6자리 코드 입력" maxlength="6">' +
             '<button type="button" class="btn-primary" style="width:100%;" onclick="confirm2FA()">인증하고 켜기</button>';
         } catch (e) {
@@ -3297,7 +3260,7 @@ app.get('/admin', (req, res) => {
           const data = await res.json();
           const box = document.getElementById('coupangUnlockResult');
           if (data.success) {
-            box.innerHTML = 'Access Key: ' + data.accessKey + '<br>Secret Key: ' + data.secretKey + '<br><span style="color:#6EE7B7;">이 키는 검색/자동변환에 비밀번호 입력 없이 계속 쓰이고 있어요</span>';
+            box.innerHTML = 'Access Key: ' + data.accessKey + '<br>Secret Key: ' + data.secretKey + '<br><span style="color:#3FBFA6;">이 키는 검색/자동변환에 비밀번호 입력 없이 계속 쓰이고 있어요</span>';
           } else {
             box.innerHTML = '';
             alert(data.error || '실패했어요');
@@ -3430,11 +3393,11 @@ app.get('/admin/renew', (req, res) => {
       ${RADAR_BG}
       <form method="POST" action="/admin/renew" class="glass" style="padding:36px; width:340px; text-align:center;">
         <div style="font-size:32px; margin-bottom:10px;">⏳</div>
-        <h2 class="cute" style="margin:0 0 10px; color:#FFFFFF; font-weight:normal;">이용 기간이 끝났어요</h2>
-        <p style="font-size:12px; color:#9083ab; margin-bottom:16px;">만료일: ${escapeHtml(user.subscriptionExpiresAt)}<br>새 인증코드를 입력하면 1개월 더 이용할 수 있어요.</p>
+        <h2 class="cute" style="margin:0 0 10px; color:#4A2545; font-weight:normal;">이용 기간이 끝났어요</h2>
+        <p style="font-size:12px; color:#8A6A93; margin-bottom:16px;">만료일: ${escapeHtml(user.subscriptionExpiresAt)}<br>새 인증코드를 입력하면 1개월 더 이용할 수 있어요.</p>
         <input type="text" name="renewCode" placeholder="인증코드" required autocomplete="off" style="text-align:center;">
         <button type="submit" class="btn-primary" style="width:100%; margin-top:6px;">인증코드로 갱신하기</button>
-        <div style="margin-top:14px;"><a href="/admin/logout" style="color:#9083ab; font-size:11px;">로그아웃</a></div>
+        <div style="margin-top:14px;"><a href="/admin/logout" style="color:#8A6A93; font-size:11px;">로그아웃</a></div>
       </form>
     </body></html>
   `);
@@ -3455,7 +3418,7 @@ app.post('/admin/renew', (req, res) => {
         ${RADAR_BG}
         <div class="glass" style="padding:32px; text-align:center;">
           <p style="color:#ff3860;">인증코드가 올바르지 않거나 이미 사용됐어요.</p>
-          <a href="/admin/renew" style="color:#3d5afe;">다시 시도</a>
+          <a href="/admin/renew" style="color:#E0399B;">다시 시도</a>
         </div>
       </body></html>
     `);
@@ -3707,7 +3670,7 @@ app.post('/admin/settings/2fa/start', (req, res) => {
   users[username].totpSecret = secret;
   users[username].totpEnabled = false;
   saveUsers(users);
-  const otpauth = `otpauth://totp/${encodeURIComponent('쇼핑레이더:' + username)}?secret=${secret}&issuer=${encodeURIComponent('쇼핑레이더')}`;
+  const otpauth = `otpauth://totp/${encodeURIComponent('반짝딜:' + username)}?secret=${secret}&issuer=${encodeURIComponent('반짝딜')}`;
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(otpauth)}`;
   res.json({ success: true, secret, qrUrl });
 });
