@@ -613,24 +613,27 @@ app.get('/r/:code/go', (req, res) => {
   recordCountryClick(code, ip).catch(() => {});
 });
 
-// ===== 공통 파스텔 핑크 반짝이는 테마 스타일 (블링블링 글리터 배경) =====
+// ===== 공통 화이트&핑크 테마 배경 (은은한 구름 블롭 + 코너 잎사귀 장식) =====
 const RADAR_BG = `
   <div class="sparkle-blobs">
     <div class="blob blob-1"></div>
     <div class="blob blob-2"></div>
     <div class="blob blob-3"></div>
   </div>
-  <div class="sparkle-dust">
-    ${Array.from({ length: 26 }).map((_, i) => {
-      const left = (i * 37 + 5) % 100;
-      const top = (i * 53 + 11) % 100;
-      const delay = (i % 10) * 0.35;
-      const dur = 2.6 + (i % 5) * 0.5;
-      const size = 3 + (i % 4);
-      const kind = i % 3 === 0 ? '✦' : (i % 3 === 1 ? '✧' : '•');
-      return `<span class="dust" style="left:${left}%; top:${top}%; animation-delay:${delay}s; animation-duration:${dur}s; font-size:${size + 6}px;">${kind}</span>`;
-    }).join('')}
-  </div>
+  <svg class="corner-leaf corner-leaf-tr" viewBox="0 0 220 220" xmlns="http://www.w3.org/2000/svg">
+    <g fill="none" stroke="#FFC1DE" stroke-width="2.5" opacity="0.55">
+      <path d="M210 10 C160 20, 120 60, 90 110 C130 100, 170 80, 210 60"/>
+      <path d="M180 15 C150 40, 130 70, 115 105"/>
+      <path d="M205 45 C175 55, 150 75, 135 100"/>
+    </g>
+  </svg>
+  <svg class="corner-leaf corner-leaf-bl" viewBox="0 0 220 220" xmlns="http://www.w3.org/2000/svg">
+    <g fill="none" stroke="#FFC1DE" stroke-width="2.5" opacity="0.5">
+      <path d="M10 210 C20 160, 60 120, 110 90 C100 130, 80 170, 60 210"/>
+      <path d="M15 180 C40 150, 70 130, 105 115"/>
+      <path d="M45 205 C55 175, 75 150, 100 135"/>
+    </g>
+  </svg>
 `;
 
 // ===== 사용법 설명서 (새 기능을 추가할 때마다 여기에 이어서 기록해요) =====
@@ -691,11 +694,11 @@ const THEME_STYLE = `
   <link href="https://fonts.googleapis.com/css2?family=Jua&family=Baloo+2:wght@500;700;800&family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet">
   <style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-    html { background: #FFE9F5; margin: 0; }
+    html { background: #FFF6FA; margin: 0; }
     .cute { font-family: 'Jua', 'Noto Sans KR', sans-serif; letter-spacing: 0.5px; }
     body {
       font-family: 'Noto Sans KR', -apple-system, 'Malgun Gothic', sans-serif;
-      background: linear-gradient(160deg, #FFE9F5 0%, #FDEBFF 30%, #F1E6FF 60%, #FFF0F7 100%);
+      background: linear-gradient(160deg, #FFF6FA 0%, #FFEFF6 35%, #FBF3FF 65%, #FFF6FA 100%);
       background-attachment: fixed;
       color: #4A2545;
       margin: 0;
@@ -707,28 +710,22 @@ const THEME_STYLE = `
 
     .sparkle-blobs { position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
     .blob {
-      position: absolute; border-radius: 50%; filter: blur(50px); opacity: 0.55;
+      position: absolute; border-radius: 50%; filter: blur(60px); opacity: 0.35;
       animation: blobFloat 14s ease-in-out infinite;
     }
-    .blob-1 { width: 380px; height: 380px; top: -80px; left: -60px; background: radial-gradient(circle, #FFB6DE, transparent 70%); animation-duration: 16s; }
-    .blob-2 { width: 320px; height: 320px; top: 30%; right: -100px; background: radial-gradient(circle, #D6B8FF, transparent 70%); animation-duration: 19s; animation-delay: -4s; }
-    .blob-3 { width: 300px; height: 300px; bottom: -80px; left: 20%; background: radial-gradient(circle, #FFD9EE, transparent 70%); animation-duration: 21s; animation-delay: -9s; }
+    .blob-1 { width: 380px; height: 380px; top: -80px; left: -60px; background: radial-gradient(circle, #FFC8E4, transparent 70%); animation-duration: 16s; }
+    .blob-2 { width: 320px; height: 320px; top: 30%; right: -100px; background: radial-gradient(circle, #E3D0FF, transparent 70%); animation-duration: 19s; animation-delay: -4s; }
+    .blob-3 { width: 300px; height: 300px; bottom: -80px; left: 20%; background: radial-gradient(circle, #FFE2F0, transparent 70%); animation-duration: 21s; animation-delay: -9s; }
     @keyframes blobFloat {
       0%, 100% { transform: translate(0, 0) scale(1); }
       33% { transform: translate(30px, -25px) scale(1.08); }
       66% { transform: translate(-20px, 20px) scale(0.95); }
     }
 
-    .sparkle-dust { position: fixed; inset: 0; pointer-events: none; z-index: 1; }
-    .dust {
-      position: absolute; color: #FF9FD1; opacity: 0;
-      text-shadow: 0 0 6px rgba(255,159,209,0.9), 0 0 12px rgba(214,184,255,0.7);
-      animation: twinkle 3s ease-in-out infinite;
-    }
-    @keyframes twinkle {
-      0%, 100% { opacity: 0; transform: scale(0.6) rotate(0deg); }
-      50% { opacity: 1; transform: scale(1.15) rotate(20deg); }
-    }
+    .corner-leaf { position: fixed; width: 220px; height: 220px; pointer-events: none; z-index: 0; }
+    .corner-leaf-tr { top: 0; right: 0; }
+    .corner-leaf-bl { bottom: 0; left: 0; }
+    @media (max-width: 700px) { .corner-leaf { width: 130px; height: 130px; } }
 
     .cute { text-shadow: 0 1px 0 rgba(255,255,255,0.6); }
     .glass {
@@ -769,13 +766,15 @@ const THEME_STYLE = `
     }
     .btn-primary:hover { filter: brightness(1.05); }
     .btn-ghost {
-      background: rgba(255,111,181,0.12);
+      background: #FFFFFF;
       color: #E0399B;
-      border: 1.5px solid rgba(255,111,181,0.32);
+      border: 1.5px solid rgba(255,111,181,0.3);
       padding: 10px 16px;
       border-radius: 999px;
       font-weight: 700;
+      box-shadow: 0 2px 8px rgba(255,111,181,0.12);
     }
+    .btn-ghost:hover { background: rgba(255,111,181,0.06); }
     a { color: #B84FD6; }
     .mono { font-family: 'Baloo 2', 'Consolas', monospace; }
   </style>
@@ -1740,6 +1739,11 @@ app.get('/admin', (req, res) => {
         </div>
         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
           <button type="button" class="btn-ghost" onclick="document.getElementById('profilePanel').style.display = document.getElementById('profilePanel').style.display === 'none' ? 'block' : 'none';" style="white-space:nowrap;">⚙️ 내 프로필</button>
+          ${isAdmin ? `
+          <button type="button" class="btn-ghost" onclick="document.getElementById('invitePanel').style.display = document.getElementById('invitePanel').style.display === 'none' ? 'block' : 'none';" style="white-space:nowrap;">🎟️ 초대 코드</button>
+          <button type="button" class="btn-ghost" onclick="document.getElementById('statsPanel').style.display = document.getElementById('statsPanel').style.display === 'none' ? 'block' : 'none';" style="white-space:nowrap;">📊 사용자 통계</button>
+          <button type="button" class="btn-ghost" onclick="document.getElementById('usersPanel').style.display = document.getElementById('usersPanel').style.display === 'none' ? 'block' : 'none';" style="white-space:nowrap;">👥 사용자 관리</button>
+          ` : ''}
           <button type="button" class="btn-ghost" onclick="document.getElementById('guideModal').style.display='flex';" style="white-space:nowrap;">📖 사용법</button>
           <button type="button" id="soundToggleBtn" class="btn-ghost cute" onclick="toggleSound()" style="white-space:nowrap;">🔇 소리 끄기</button>
         </div>
@@ -1883,8 +1887,8 @@ app.get('/admin', (req, res) => {
           };
           return platforms.map((p) => `
             <div class="total-box glass">
+              <div style="width:44px; height:44px; border-radius:50%; background:rgba(255,111,181,0.14); display:flex; align-items:center; justify-content:center; font-size:20px; margin-bottom:10px;">${labels[p][2]}</div>
               <div class="eyebrow cute" style="font-size:14px; margin-bottom:2px;">${labels[p][0]}</div>
-              <div class="eyebrow" style="margin-bottom:4px;">${labels[p][2]} ${labels[p][1]}</div>
               <div class="total-num mono" id="num_${p}">${totalToday[p]}</div>
               <div class="total-label">오늘 클릭 · 중복 IP 제외</div>
               <div class="chart-controls">
@@ -1945,6 +1949,7 @@ app.get('/admin', (req, res) => {
       </div>
 
       ${isAdmin ? `
+      <div id="invitePanel" style="display:none;">
       <div class="glass" style="padding:18px 22px; margin-bottom:20px;">
         <div class="eyebrow cute" style="font-size:14px; margin-bottom:10px;">🎟️ 초대 코드 관리 (관리자 전용)</div>
         <p style="font-size:11px; color:#8A6A93; margin-bottom:12px;">여기서 만든 코드는 딱 한 번만 가입에 쓸 수 있고, 정해둔 기간이 지나면 자동으로 무효화돼요.</p>
@@ -1969,7 +1974,9 @@ app.get('/admin', (req, res) => {
           `; }).join('') || '<div style="font-size:12px; color:#8A6A93;">아직 발급한 코드가 없어요</div>'}
         </div>
       </div>
+      </div>
 
+      <div id="statsPanel" style="display:none;">
       <div class="glass" style="padding:18px 22px; margin-bottom:20px;">
         <div class="eyebrow cute" style="font-size:14px; margin-bottom:10px;">📊 사용자 통계 요약</div>
         <div style="display:flex; gap:24px; flex-wrap:wrap;">
@@ -1987,7 +1994,9 @@ app.get('/admin', (req, res) => {
         </span>
       </div>
       ` : ''}
+      </div>
 
+      <div id="usersPanel" style="display:none;">
       <div class="glass" style="padding:18px 22px; margin-bottom:20px;">
         <div class="eyebrow cute" style="font-size:14px; margin-bottom:10px;">👥 사용자 관리 (관리자 전용)</div>
         <div style="display:flex; flex-wrap:wrap; gap:16px;">
@@ -2070,6 +2079,7 @@ app.get('/admin', (req, res) => {
             </div>
           `).join('') || '<div style="font-size:12px; color:#8A6A93;">아직 기록이 없어요</div>'}
         </div>
+      </div>
       </div>
       ` : ''}
 
