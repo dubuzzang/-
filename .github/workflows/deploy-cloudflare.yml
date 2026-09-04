@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: cloudflare-production
+  group: hot-deal-kr-production
   cancel-in-progress: false
 
 jobs:
@@ -42,7 +42,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
       - name: Deploy Pages frontend
-        run: npx wrangler pages deploy dist --project-name dubuzzang-hotdeal --branch cloudflare-pages --commit-hash "${{ github.sha }}"
+        run: npx wrangler pages deploy dist --project-name hot-deal-kr --branch cloudflare-pages --commit-hash "${{ github.sha }}"
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

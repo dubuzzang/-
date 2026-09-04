@@ -10,7 +10,7 @@
     "deploy:cloudflare": "npm run deploy:worker && npm run deploy:pages",
     "check:worker": "node --check index.js && wrangler deploy --dry-run --config cloudflare/worker.jsonc",
     "deploy:worker": "npm run build && wrangler deploy --config cloudflare/worker.jsonc",
-    "deploy:pages": "npm run build && wrangler pages deploy dist --project-name dubuzzang-hotdeal"
+    "deploy:pages": "npm run build && wrangler pages deploy dist --project-name hot-deal-kr"
   },
   "keywords": [],
   "author": "",

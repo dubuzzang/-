@@ -543,6 +543,10 @@ app.use(cloudflareStorage.jsonMiddleware(() => ({
   priceCollectionState: { lastRun: '' }
 })));
 
+app.get('/', (_req, res) => {
+  res.redirect(302, '/admin/login');
+});
+
 // Cloudflare Cron 전용 경로. 공개 Pages Function에서 이 경로를 먼저 차단한다.
 app.post('/__cloudflare/maintenance', async (_req, res) => {
   if (!cloudflareStorage.isCloudflare) return res.sendStatus(404);
