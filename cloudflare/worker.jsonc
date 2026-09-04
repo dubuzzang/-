@@ -1,0 +1,23 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "dubuzzang-hotdeal-app",
+  "workers_dev": false,
+  "preview_urls": false,
+  "main": "./entry.mjs",
+  "compatibility_date": "2026-09-03",
+  "compatibility_flags": ["nodejs_compat", "enable_nodejs_http_modules", "enable_nodejs_http_server_modules"],
+  "vars": { "CLOUDFLARE_RUNTIME": "true" },
+  "triggers": { "crons": ["17,47 * * * *"] },
+  "durable_objects": {
+    "bindings": [
+      { "name": "REQUEST_COORDINATOR", "class_name": "RequestCoordinator" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["RequestCoordinator"] }
+  ],
+  "r2_buckets": [
+    { "binding": "DATA", "bucket_name": "dubuzzang-hotdeal-data" }
+  ],
+  "observability": { "enabled": true }
+}

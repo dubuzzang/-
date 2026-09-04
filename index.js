@@ -1,14 +1,15 @@
 const express = require('express');
 const fs = require('fs');
+const cloudflareStorage = require('./cloudflare/storage');
 const app = express();
 const PORT = process.env.PORT || 3000;
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'changeme';
+const ADMIN_PASSWORD = cloudflareStorage.getBinding('ADMIN_PASSWORD', process.env.ADMIN_PASSWORD) || 'changeme';
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-const COUPANG_ACCESS_KEY = process.env.COUPANG_ACCESS_KEY || '';
-const COUPANG_SECRET_KEY = process.env.COUPANG_SECRET_KEY || '';
+const COUPANG_ACCESS_KEY = cloudflareStorage.getBinding('COUPANG_ACCESS_KEY', process.env.COUPANG_ACCESS_KEY) || '';
+const COUPANG_SECRET_KEY = cloudflareStorage.getBinding('COUPANG_SECRET_KEY', process.env.COUPANG_SECRET_KEY) || '';
 const crypto = require('crypto');
 
 const DATA_FILE = '/data/links.json';
@@ -16,28 +17,26 @@ const CLICKS_FILE = '/data/clicks.json';
 const USERS_FILE = '/data/users.json';
 const ACTIVITY_FILE = '/data/activity.json';
 const INVITES_FILE = '/data/invites.json';
-if (!fs.existsSync(INVITES_FILE)) fs.writeFileSync(INVITES_FILE, JSON.stringify([]));
+if (!cloudflareStorage.isCloudflare && !fs.existsSync(INVITES_FILE)) fs.writeFileSync(INVITES_FILE, JSON.stringify([]));
 
-function loadInvites() { return JSON.parse(fs.readFileSync(INVITES_FILE, 'utf8')); }
-function saveInvites(data) { fs.writeFileSync(INVITES_FILE, JSON.stringify(data, null, 2)); }
+function loadInvites() { return cloudflareStorage.readJson('invites', INVITES_FILE, []); }
+function saveInvites(data) { cloudflareStorage.writeJson('invites', INVITES_FILE, data); }
 function generateInviteCode() {
   return crypto.randomBytes(5).toString('hex').toUpperCase();
 }
-if (!fs.existsSync(ACTIVITY_FILE)) fs.writeFileSync(ACTIVITY_FILE, JSON.stringify([]));
+if (!cloudflareStorage.isCloudflare && !fs.existsSync(ACTIVITY_FILE)) fs.writeFileSync(ACTIVITY_FILE, JSON.stringify([]));
 
 function logActivity(user, action, detail) {
   try {
-    const log = JSON.parse(fs.readFileSync(ACTIVITY_FILE, 'utf8'));
+    const log = cloudflareStorage.readJson('activity', ACTIVITY_FILE, []);
     log.unshift({ time: getNowKSTString(), user: user || '(비로그인)', action, detail: detail || '' });
-    fs.writeFileSync(ACTIVITY_FILE, JSON.stringify(log.slice(0, 200), null, 2));
+    cloudflareStorage.writeJson('activity', ACTIVITY_FILE, log.slice(0, 200));
   } catch (e) {}
 }
-function loadActivityLog() {
-  try { return JSON.parse(fs.readFileSync(ACTIVITY_FILE, 'utf8')); } catch (e) { return []; }
-}
+function loadActivityLog() { return cloudflareStorage.readJson('activity', ACTIVITY_FILE, []); }
 
-if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, JSON.stringify({}));
-if (!fs.existsSync(CLICKS_FILE)) fs.writeFileSync(CLICKS_FILE, JSON.stringify({}));
+if (!cloudflareStorage.isCloudflare && !fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, JSON.stringify({}));
+if (!cloudflareStorage.isCloudflare && !fs.existsSync(CLICKS_FILE)) fs.writeFileSync(CLICKS_FILE, JSON.stringify({}));
 
 const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
@@ -162,22 +161,22 @@ function verifyPassword(password, stored) {
   return check === hash;
 }
 
-function loadUsers() { return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8')); }
-function saveUsers(data) { fs.writeFileSync(USERS_FILE, JSON.stringify(data, null, 2)); }
+function loadUsers() { return cloudflareStorage.readJson('users', USERS_FILE, {}); }
+function saveUsers(data) { cloudflareStorage.writeJson('users', USERS_FILE, data); }
 
 // 최초 실행 시, 기존 ADMIN_PASSWORD로 로그인 가능한 관리자 계정을 자동으로 만들어둠
-if (!fs.existsSync(USERS_FILE)) {
+if (!cloudflareStorage.isCloudflare && !fs.existsSync(USERS_FILE)) {
   saveUsers({
     admin: { password: hashPassword(ADMIN_PASSWORD), isAdmin: true, youtubeId: '', email: '', nickname: '', avatarUrl: '', referredBy: '', totpSecret: '', totpEnabled: false, subscriptionType: 'lifetime', subscriptionExpiresAt: '', createdAt: getTodayKST(), adminNote: '' }
   });
 }
 
-function loadLinks() { return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); }
-function saveLinks(data) { fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2)); }
+function loadLinks() { return cloudflareStorage.readJson('links', DATA_FILE, {}); }
+function saveLinks(data) { cloudflareStorage.writeJson('links', DATA_FILE, data); }
 
 // 다중 사용자 기능이 생기기 전에 만들어진 링크는 owner 정보가 없어서,
 // 그대로 두면 필터링 때 아무한테도 안 보이게 됨 → 서버 시작 시 자동으로 관리자 소유로 채워줌
-(function migrateOwnerlessLinks() {
+if (!cloudflareStorage.isCloudflare) (function migrateOwnerlessLinks() {
   try {
     const links = loadLinks();
     let changed = false;
@@ -191,8 +190,8 @@ function saveLinks(data) { fs.writeFileSync(DATA_FILE, JSON.stringify(data, null
   } catch (e) {}
 })();
 
-function loadClicks() { return JSON.parse(fs.readFileSync(CLICKS_FILE, 'utf8')); }
-function saveClicks(data) { fs.writeFileSync(CLICKS_FILE, JSON.stringify(data, null, 2)); }
+function loadClicks() { return cloudflareStorage.readJson('clicks', CLICKS_FILE, {}); }
+function saveClicks(data) { cloudflareStorage.writeJson('clicks', CLICKS_FILE, data); }
 
 function getTodayKST() {
   const now = new Date();
@@ -265,6 +264,16 @@ async function recordCountryClick(code, ip) {
   if (!link.countryClicks) link.countryClicks = {};
   link.countryClicks[country] = (link.countryClicks[country] || 0) + 1;
   saveLinks(links);
+}
+
+function getCloudflareCountry(req) {
+  const code = String(req.headers['cf-ipcountry'] || '').toUpperCase();
+  if (!/^[A-Z]{2}$/.test(code) || code === 'XX') return null;
+  try {
+    return new Intl.DisplayNames(['ko'], { type: 'region' }).of(code) || code;
+  } catch (_error) {
+    return code;
+  }
 }
 
 function makeSessionToken(username) {
@@ -389,29 +398,47 @@ async function scrapeProductPrice(url) {
 
 // 매일 한 번, 등록된 모든 링크의 가격을 수집해서 기록
 const PRICE_STATE_FILE = '/data/priceCollectionState.json';
+const PRICE_BATCH_SIZE = cloudflareStorage.isCloudflare ? 20 : Number.MAX_SAFE_INTEGER;
 async function collectDailyPrices() {
   const today = getTodayKST();
-  let state = { lastRun: '' };
-  try { state = JSON.parse(fs.readFileSync(PRICE_STATE_FILE, 'utf8')); } catch (e) {}
-  if (state.lastRun === today) return; // 오늘 이미 했으면 넘어감
+  let state = { lastRun: '', collectionDate: '', cursor: 0 };
+  try {
+    state = {
+      ...state,
+      ...cloudflareStorage.readJson('priceCollectionState', PRICE_STATE_FILE, state)
+    };
+  } catch (e) {}
+  if (state.lastRun === today) return { complete: true, processed: 0 }; // 오늘 이미 했으면 넘어감
 
   const links = loadLinks();
-  for (const code in links) {
+  const codes = Object.keys(links).filter((code) => links[code] && links[code].url);
+  const cursor = state.collectionDate === today ? Math.max(0, Number(state.cursor) || 0) : 0;
+  const batch = codes.slice(cursor, cursor + PRICE_BATCH_SIZE);
+
+  for (let index = 0; index < batch.length; index++) {
+    const code = batch[index];
     const link = links[code];
-    if (!link.url) continue;
     const price = await scrapeProductPrice(link.url);
     if (price) {
       if (!link.priceHistory) link.priceHistory = {};
       link.priceHistory[today] = price;
     }
-    await new Promise((r) => setTimeout(r, 800)); // 너무 빠르게 연속 요청하지 않도록 살짝 텀을 둠
+    if (index < batch.length - 1) await new Promise((r) => setTimeout(r, 800)); // 너무 빠르게 연속 요청하지 않도록 살짝 텀을 둠
   }
+
   saveLinks(links);
-  fs.writeFileSync(PRICE_STATE_FILE, JSON.stringify({ lastRun: today }));
+  const nextCursor = cursor + batch.length;
+  const complete = nextCursor >= codes.length;
+  cloudflareStorage.writeJson('priceCollectionState', PRICE_STATE_FILE, {
+    lastRun: complete ? today : '',
+    collectionDate: today,
+    cursor: complete ? 0 : nextCursor
+  });
+  return { complete, processed: batch.length, remaining: Math.max(0, codes.length - nextCursor) };
 }
 
 // 서버가 켜져 있는 동안 1시간마다 "오늘 가격 수집 했나?" 확인해서, 안 했으면 실행
-setInterval(() => { collectDailyPrices().catch(() => {}); }, 60 * 60 * 1000).unref();
+if (!cloudflareStorage.isCloudflare) setInterval(() => { collectDailyPrices().catch(() => {}); }, 60 * 60 * 1000).unref();
 // 서버 시작 5분 뒤에도 한 번 확인 (그날 처음 켜졌을 때를 위해)
 
 // 이용기간이 끝난 사용자(관리자 제외, 평생이용 제외)의 링크를 자동으로 정리
@@ -435,13 +462,18 @@ function cleanupExpiredUserLinks() {
       saveLinks(links);
       logActivity('(시스템)', '이용기간 만료 링크 자동 삭제', [...affectedUsers].join(', ') + ` (${removedCount}개)`);
     }
-  } catch (e) {}
+    return removedCount;
+  } catch (e) {
+    return 0;
+  }
 }
-setTimeout(() => { collectDailyPrices().catch(() => {}); }, 5 * 60 * 1000).unref();
+if (!cloudflareStorage.isCloudflare) setTimeout(() => { collectDailyPrices().catch(() => {}); }, 5 * 60 * 1000).unref();
 
 // 1시간마다 만료된 사용자 링크 정리, 서버 시작 1분 뒤에도 한 번 확인
-setInterval(cleanupExpiredUserLinks, 60 * 60 * 1000).unref();
-setTimeout(cleanupExpiredUserLinks, 60 * 1000).unref();
+if (!cloudflareStorage.isCloudflare) {
+  setInterval(cleanupExpiredUserLinks, 60 * 60 * 1000).unref();
+  setTimeout(cleanupExpiredUserLinks, 60 * 1000).unref();
+}
 
 // 아무 쿠팡 링크나 넣으면 내 파트너스 링크로 변환
 async function convertToDeeplink(coupangUrl, accessKey, secretKey) {
@@ -499,6 +531,29 @@ function isSubscriptionExpired(user) {
   if (!user.subscriptionExpiresAt) return false;
   return getTodayKST() > user.subscriptionExpiresAt;
 }
+
+app.use(cloudflareStorage.jsonMiddleware(() => ({
+  links: {},
+  clicks: {},
+  users: {
+    admin: { password: hashPassword(ADMIN_PASSWORD), isAdmin: true, youtubeId: '', email: '', nickname: '', avatarUrl: '', referredBy: '', totpSecret: '', totpEnabled: false, subscriptionType: 'lifetime', subscriptionExpiresAt: '', createdAt: getTodayKST(), adminNote: '' }
+  },
+  activity: [],
+  invites: [],
+  priceCollectionState: { lastRun: '' }
+})));
+
+// Cloudflare Cron 전용 경로. 공개 Pages Function에서 이 경로를 먼저 차단한다.
+app.post('/__cloudflare/maintenance', async (_req, res) => {
+  if (!cloudflareStorage.isCloudflare) return res.sendStatus(404);
+  try {
+    const prices = await collectDailyPrices();
+    const removedExpiredLinks = cleanupExpiredUserLinks();
+    res.json({ success: true, prices, removedExpiredLinks });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 // 네이버 등 일부 이미지 서버는 "다른 사이트에서 직접 불러오기(핫링크)"를 막아둬서,
 // 우리 서버가 대신 받아와서 브라우저에 전달해주는 중계 라우트
@@ -602,6 +657,11 @@ app.get('/r/:code/go', (req, res) => {
     link.dailyClicks[today] = (link.dailyClicks[today] || 0) + 1;
     if (!link.sourceClicks) link.sourceClicks = {};
     link.sourceClicks[src] = (link.sourceClicks[src] || 0) + 1;
+    const country = cloudflareStorage.isCloudflare ? getCloudflareCountry(req) : null;
+    if (country) {
+      if (!link.countryClicks) link.countryClicks = {};
+      link.countryClicks[country] = (link.countryClicks[country] || 0) + 1;
+    }
     saveLinks(links);
     clicks[code][today][ip] = true;
     saveClicks(clicks);
@@ -610,7 +670,7 @@ app.get('/r/:code/go', (req, res) => {
   res.redirect(link.url);
 
   // 리다이렉트는 이미 보냈고, 그 이후에 조용히 지역 정보만 비동기로 기록 (사용자 체감 속도에 영향 없음)
-  recordCountryClick(code, ip).catch(() => {});
+  if (!cloudflareStorage.isCloudflare) recordCountryClick(code, ip).catch(() => {});
 });
 
 // ===== 공통 화이트&핑크 테마 배경 (은은한 구름 블롭 + 코너 잎사귀 장식) =====
@@ -1354,7 +1414,7 @@ app.post('/admin/api/collect-prices-now', async (req, res) => {
   if (!isLoggedIn(req)) return res.status(401).json({ success: false });
   if (!isAdminUser(req)) return res.status(403).json({ success: false, error: '관리자만 실행할 수 있어요' });
   try {
-    fs.writeFileSync(PRICE_STATE_FILE, JSON.stringify({ lastRun: '' })); // 강제로 다시 돌게
+    cloudflareStorage.writeJson('priceCollectionState', PRICE_STATE_FILE, { lastRun: '' }); // 강제로 다시 돌게
     await collectDailyPrices();
     res.json({ success: true });
   } catch (e) {
