@@ -459,7 +459,9 @@ function parseProductMeta(html, pageUrl) {
 
   // <title>은 "네이버 브랜드 커넥트"처럼 사이트 이름만 있는 경우가 많아서, 공유 문구 제목보다 뒤로 미룸
   const pageTitle = decodeHtmlEntities((html.match(/<title[^>]*>([^<]*)<\/title>/i) || [])[1] || '').trim();
-  const title = meta('og:title') || meta('twitter:title') || (product && product.name) || '';
+  // "상품명 | 토스쇼핑"처럼 뒤에 붙는 쇼핑몰 이름은 떼어냄
+  const title = (meta('og:title') || meta('twitter:title') || (product && product.name) || '')
+    .replace(/\s*[|:]\s*(토스쇼핑|쿠팡|네이버\s?쇼핑|올리브영)\s*$/, '').trim();
   let image = meta('og:image') || meta('twitter:image') || (ldImage && (ldImage.url || ldImage)) || '';
   try { image = image ? new URL(image, pageUrl).href : ''; } catch (e) { image = ''; }
   if (!/^https?:\/\//i.test(image)) image = '';
@@ -900,6 +902,8 @@ const RADAR_BG = `
 // ===== 🚆 반짝딜 담기 북마크 버튼 =====
 // 쿠팡은 서버에서 상품 페이지를 못 읽어서(403), 상품 페이지를 보고 있는 내 브라우저가 대신 제목·사진·가격·할인율을 읽어
 // 대시보드 등록칸으로 넘겨줌. 아래 함수는 서버에서 실행되지 않고, 글자로 바뀌어 북마크(javascript:) 안에 들어감
+// 화면에서 못 찾는 값은 검색엔진용 상품 정보(JSON-LD)에서 가져와서, 폰 크롬(m.coupang.com)에서도 동작함
+// (폰에서 줄바꿈이 사라져도 깨지지 않게 함수 안에는 // 주석을 넣지 않음)
 function sendProductToDashboard(target) {
   var text = function (selector) {
     var el = document.querySelector(selector);
@@ -913,14 +917,25 @@ function sendProductToDashboard(target) {
     var n = parseInt(String(value).replace(/[^\d]/g, ''), 10);
     return n > 0 ? n : '';
   };
-  var title = text('h1.product-title') || text('.prod-buy-header__title');
+  var ld = {};
+  var scripts = document.querySelectorAll('script[type="application/ld+json"]');
+  for (var i = 0; i < scripts.length; i++) {
+    try {
+      var parsed = JSON.parse(scripts[i].textContent);
+      var nodes = [].concat(parsed['@graph'] || parsed);
+      for (var j = 0; j < nodes.length; j++) if (nodes[j] && nodes[j]['@type'] === 'Product') ld = nodes[j];
+    } catch (e) {}
+  }
+  var ldOffer = [].concat(ld.offers || [])[0] || {};
+  var ldImage = [].concat(ld.image || [])[0] || '';
+  var title = text('h1.product-title') || text('.prod-buy-header__title') || ld.name || '';
   if (!title) {
     title = meta('og:title');
     if (/\|\s*쿠팡\s*$/.test(title)) title = title.replace(/\s*\|\s*쿠팡\s*$/, '').replace(/\s+-\s+[^-]+$/, '');
   }
-  var image = meta('og:image');
+  var image = String(meta('og:image') || ldImage.url || ldImage || '');
   if (image.indexOf('//') === 0) image = 'https:' + image;
-  var price = num(text('.price-container .final-price-amount') || text('.final-price-amount') || text('.total-price strong') || meta('product:price:amount'));
+  var price = num(text('.price-container .final-price-amount') || text('.final-price-amount') || text('.total-price strong') || ldOffer.price || ldOffer.lowPrice || meta('product:price:amount'));
   var original = num(text('.price-container .original-price-amount') || text('.origin-price'));
   var rateMatch = (text('.price-container .original-price') || text('.discount-percentage')).match(/(\d{1,2})\s*%/);
   var discountRate = rateMatch ? Number(rateMatch[1]) : (price && original > price ? Math.round((original - price) / original * 100) : '');
@@ -2197,8 +2212,12 @@ app.get('/admin', (req, res) => {
           <button type="button" onclick="openSearchModal()" class="btn-ghost" style="width:100%; margin-top:10px;">🔍 상품 이름으로 검색해서 채우기</button>
         </form>
         <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:14px; padding-top:12px; border-top:1px dashed rgba(255,111,181,0.3); font-size:11px; color:#8A6A93;">
-          <a href="${escapeHtml(productBookmarkletHref(host))}" onclick="setProductStatus('이 버튼은 누르지 말고 북마크바로 끌어다 놓아주세요. 그다음 쿠팡 상품 페이지에서 누르면 돼요', '#E0A200'); return false;" title="북마크바로 끌어다 놓으세요" style="flex-shrink:0; background:linear-gradient(135deg, #FF6FB5, #B084F5); color:#fff; font-weight:800; font-size:12px; padding:7px 14px; border-radius:999px; text-decoration:none; cursor:grab;">🚆 반짝딜 담기</a>
-          <span style="flex:1; min-width:200px;">← 북마크바로 끌어다 놓고, <b>쿠팡 상품 페이지에서 누르면</b> 사진·제목·가격·할인율까지 자동으로 채워져요 (쿠팡은 서버에서 상품 페이지를 못 읽어서, 보고 있는 브라우저가 대신 읽어줘요)</span>
+          <a href="${escapeHtml(productBookmarkletHref(host))}" id="bookmarkletLink" onclick="setProductStatus('이 버튼은 누르지 말고 북마크바로 끌어다 놓아주세요. 그다음 쿠팡 상품 페이지에서 누르면 돼요', '#E0A200'); return false;" title="북마크바로 끌어다 놓으세요" style="flex-shrink:0; background:linear-gradient(135deg, #FF6FB5, #B084F5); color:#fff; font-weight:800; font-size:12px; padding:7px 14px; border-radius:999px; text-decoration:none; cursor:grab;">🚆 반짝딜 담기</a>
+          <button type="button" class="btn-ghost" style="flex-shrink:0; font-size:11px; padding:6px 12px;" onclick="copyText(document.getElementById('bookmarkletLink').getAttribute('href'), this)">📋 북마크 주소 복사</button>
+          <div style="flex:1 1 260px; line-height:1.6;">
+            <div>💻 PC: 버튼을 북마크바로 끌어다 놓고, <b>쿠팡 상품 페이지에서 누르면</b> 사진·제목·가격·할인율까지 자동으로 채워져요</div>
+            <div>📱 폰: 쿠팡 상품을 <b>쿠팡 앱 말고 크롬</b>에서 열고, 주소창에 <b>반짝딜</b> 입력 → 뜨는 북마크를 누르면 똑같이 채워져요 (PC 크롬 북마크가 동기화돼 있거나, "북마크 주소 복사"로 폰에 북마크를 만들어두면 돼요)</div>
+          </div>
         </div>
       </div>
 
@@ -2517,7 +2536,7 @@ app.get('/admin', (req, res) => {
           let message = data.converted ? '✅ 내 파트너스 링크로 변환했어요' : '✅ 링크를 불러왔어요';
           if (!hasImage || !hasTitle) {
             message += data.converted
-              ? ' · 쿠팡은 서버에서 사진/제목을 못 읽어요 → 쿠팡 상품 페이지에서 🚆 반짝딜 담기 버튼을 누르면 자동으로 채워져요'
+              ? ' · 쿠팡은 서버에서 사진/제목을 못 읽어요 → 쿠팡 상품 페이지(PC·폰 크롬)에서 🚆 반짝딜 담기 북마크를 누르면 자동으로 채워져요'
               : ' · ' + [!hasTitle && '제목', !hasImage && '사진'].filter(Boolean).join('/') + '은(는) 못 찾아서 직접 입력하거나 🔍 검색으로 채워주세요';
           }
           setProductStatus(message, hasImage && hasTitle ? '#3FBFA6' : '#E0A200');
