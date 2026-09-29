@@ -16,8 +16,9 @@ The bucket contains:
 
 Write requests and click-count redirects pass through one `RequestCoordinator`
 Durable Object, preventing concurrent JSON read-modify-write operations from
-overwriting each other. Read-only requests bypass it. Price collection and
-expired-link cleanup run in batches from the Worker's Cron Trigger.
+overwriting each other. Read-only requests bypass it. Price collection,
+expired-link cleanup, and removal of unpinned links created three or more days
+ago (plus past-day entries in `clicks.json`) run from the Worker's Cron Trigger.
 
 Preview deployments are disabled because they would otherwise write to the same
 production bucket. Runtime secrets are configured on the private Worker and are

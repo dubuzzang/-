@@ -332,6 +332,11 @@ function escapeHtml(str) {
   }[c]));
 }
 
+// <script> 안에 넣는 JSON (외부에서 가져온 제목에 </script> 같은 글자가 있어도 태그가 끊기지 않게)
+function scriptJson(value) {
+  return JSON.stringify(value).replace(/</g, '\\u003c');
+}
+
 // 쿠팡 파트너스 API 인증 서명 만들기
 function getSignedDate() {
   const now = new Date();
@@ -353,16 +358,151 @@ function generateCoupangAuth(method, pathWithQuery, accessKey, secretKey) {
   return `CEA algorithm=HmacSHA256, access-key=${accessKey}, signed-date=${signedDate}, signature=${signature}`;
 }
 
-// 어떤 형태의 쿠팡 링크든(다른 사람 파트너스 링크 포함) 실제 상품 주소를 먼저 찾아냄
-async function resolveToProductUrl(inputUrl) {
+const BROWSER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.8'
+};
+
+function isCoupangUrl(url) {
   try {
-    const res = await fetch(inputUrl, { method: 'GET', redirect: 'follow' });
-    const finalUrl = res.url || inputUrl;
-    const urlObj = new URL(finalUrl);
-    return urlObj.origin + urlObj.pathname;
+    const hostname = new URL(url).hostname.toLowerCase();
+    return hostname === 'coupa.ng' || hostname === 'coupang.com' || hostname.endsWith('.coupang.com');
   } catch (e) {
-    return inputUrl;
+    return false;
   }
+}
+
+// 긴 공유 문구(공정위 문구+상품명+링크) 안에서 첫 번째 인터넷 주소만 골라냄
+function extractFirstUrl(text) {
+  const match = String(text || '').match(/https?:\/\/[^\s<>"']+/);
+  return match ? match[0].replace(/[)\]}.,!?"'>]+$/, '') : '';
+}
+
+// link.coupang.com / coupa.ng 는 리다이렉트만 해주는 주소라 따라가도 되지만,
+// 그 외 쿠팡 페이지는 서버 요청을 전부 막아서(403) 주소만 알아내고 열지는 않음
+function isBlockedCoupangPage(url) {
+  const hostname = new URL(url).hostname.toLowerCase();
+  return isCoupangUrl(url) && hostname !== 'link.coupang.com' && hostname !== 'coupa.ng';
+}
+
+// 짧은 링크의 리다이렉트를 한 단계씩 따라가서 최종 주소와 HTML을 가져옴
+async function followLink(inputUrl) {
+  let current = inputUrl;
+  for (let hop = 0; hop < 6; hop++) {
+    if (isBlockedCoupangPage(current)) return { url: current, html: '' };
+    const res = await fetch(current, { redirect: 'manual', headers: BROWSER_HEADERS, signal: AbortSignal.timeout(8000) });
+    const location = res.headers.get('location');
+    if (res.status >= 300 && res.status < 400 && location) {
+      if (res.body) res.body.cancel().catch(() => {});
+      current = new URL(location, current).href;
+      continue;
+    }
+    const isHtml = (res.headers.get('content-type') || '').includes('html');
+    const html = res.ok && isHtml ? (await res.text()).slice(0, 600000) : '';
+    if (!html && res.body) res.body.cancel().catch(() => {});
+    return { url: current, html };
+  }
+  return { url: current, html: '' };
+}
+
+// 다른 사람 파트너스 추적값(lptag 등)을 떼어내고 상품 주소만 남김
+function canonicalCoupangUrl(url) {
+  const urlObj = new URL(url);
+  const productId = (urlObj.pathname.match(/\/(?:vp|vm)\/products\/(\d+)/) || [])[1];
+  if (!productId) return urlObj.origin + urlObj.pathname;
+  const params = new URLSearchParams();
+  ['itemId', 'vendorItemId'].forEach((name) => {
+    const value = urlObj.searchParams.get(name);
+    if (value) params.set(name, value);
+  });
+  const query = params.toString();
+  return `https://www.coupang.com/vp/products/${productId}${query ? '?' + query : ''}`;
+}
+
+// 쿠팡 링크를 등록할 때, 서버가 직접 변환한 링크인지 확인하는 서명 (변환 API를 두 번 부르지 않으려고)
+function signConvertedUrl(username, url) {
+  return crypto.createHmac('sha256', ADMIN_PASSWORD).update('deeplink:' + username + ':' + url).digest('hex');
+}
+
+function decodeHtmlEntities(str) {
+  return String(str || '')
+    .replace(/&#x([0-9a-f]+);/gi, (_m, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_m, dec) => String.fromCodePoint(parseInt(dec, 10)))
+    .replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&');
+}
+
+function parsePriceNumber(value) {
+  const num = parseInt(String(value === undefined || value === null ? '' : value).replace(/[^\d]/g, ''), 10);
+  return num > 0 ? num : null;
+}
+
+// 상품 페이지 HTML의 og 태그 / JSON-LD에서 제목·이미지·가격·할인율을 찾아냄
+function parseProductMeta(html, pageUrl) {
+  const meta = (name) => {
+    const tag = html.match(new RegExp(`<meta[^>]+(?:property|name|itemprop)=["']${name}["'][^>]*>`, 'i'));
+    const content = tag && tag[0].match(/content=(?:"([^"]*)"|'([^']*)')/i);
+    return content ? decodeHtmlEntities(content[1] !== undefined ? content[1] : content[2]).trim() : '';
+  };
+
+  let product = null;
+  for (const block of html.matchAll(/<script[^>]+application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)) {
+    try {
+      const data = JSON.parse(block[1]);
+      const nodes = [].concat(data['@graph'] || data);
+      product = nodes.find((node) => node && [].concat(node['@type']).includes('Product')) || product;
+    } catch (e) {}
+  }
+  const offer = product && [].concat(product.offers || [])[0];
+  const ldImage = product && [].concat(product.image || [])[0];
+
+  // <title>은 "네이버 브랜드 커넥트"처럼 사이트 이름만 있는 경우가 많아서, 공유 문구 제목보다 뒤로 미룸
+  const pageTitle = decodeHtmlEntities((html.match(/<title[^>]*>([^<]*)<\/title>/i) || [])[1] || '').trim();
+  const title = meta('og:title') || meta('twitter:title') || (product && product.name) || '';
+  let image = meta('og:image') || meta('twitter:image') || (ldImage && (ldImage.url || ldImage)) || '';
+  try { image = image ? new URL(image, pageUrl).href : ''; } catch (e) { image = ''; }
+  if (!/^https?:\/\//i.test(image)) image = '';
+  const price = parsePriceNumber(meta('product:sale_price:amount') || meta('product:price:amount') || meta('og:price:amount') || (offer && (offer.price || offer.lowPrice)));
+  const originalPrice = parsePriceNumber(meta('product:original_price:amount') || meta('og:original_price:amount'));
+  const discountRate = price && originalPrice > price ? Math.round((originalPrice - price) / originalPrice * 100) : null;
+  return { title, pageTitle, image, price, discountRate };
+}
+
+// 붙여넣은 공유 문구("상품명 / 12,900원 (35% 할인) / 링크")에서 제목·가격·할인율을 읽어냄
+function parseShareText(text, url) {
+  const body = String(text || '').replace(url, ' ');
+  const prices = [...body.matchAll(/(\d{1,3}(?:,\d{3})+|\d{3,})\s*원/g)].map((m) => parsePriceNumber(m[1])).filter(Boolean);
+  const discountMatch = body.match(/(?<!\d)(\d{1,2})\s*%/);
+  let discountRate = discountMatch ? parseInt(discountMatch[1], 10) : null;
+  const price = prices.length ? Math.min(...prices) : null;
+  if (!discountRate && prices.length > 1 && Math.max(...prices) > price) {
+    discountRate = Math.round((Math.max(...prices) - price) / Math.max(...prices) * 100);
+  }
+  const title = body.split(/\r?\n/)
+    .map((line) => line.replace(/https?:\/\/\S+/g, '').replace(/(\d{1,3}(?:,\d{3})+|\d{3,})\s*원.*$/, '').replace(/^[^\p{L}\p{N}[(]+/u, '').trim())
+    .find((line) => (line.match(/\p{L}/gu) || []).length >= 2 && !/파트너스|수수료|일환|제공받/.test(line)) || '';
+  return { title: title.slice(0, 120), price, discountRate };
+}
+
+// 쿠팡 상품 페이지는 직접 못 읽어서, 파트너스 검색 API 결과 중 상품번호가 같은 걸 찾아서 정보를 채움
+// (검색 API는 1시간 호출 횟수 제한이 있어서 같은 상품은 메모리에 잠깐 기억해둠)
+const coupangProductCache = new Map();
+async function findCoupangProduct(productUrl, titleHint, accessKey, secretKey) {
+  const productId = (productUrl.match(/\/products\/(\d+)/) || [])[1];
+  if (!productId) return null;
+  if (coupangProductCache.has(productId)) return coupangProductCache.get(productId);
+  for (const keyword of [titleHint, productId].filter(Boolean)) {
+    try {
+      const products = await searchCoupangProducts(keyword.slice(0, 50), accessKey, secretKey);
+      const match = products.find((p) => String(p.productId) === productId);
+      if (match) {
+        coupangProductCache.set(productId, match);
+        return match;
+      }
+    } catch (e) {}
+  }
+  return null;
 }
 
 // 쿠팡 상품 페이지 HTML에서 현재 가격을 추출 (실험적 기능)
@@ -469,15 +609,73 @@ function cleanupExpiredUserLinks() {
 }
 if (!cloudflareStorage.isCloudflare) setTimeout(() => { collectDailyPrices().catch(() => {}); }, 5 * 60 * 1000).unref();
 
-// 1시간마다 만료된 사용자 링크 정리, 서버 시작 1분 뒤에도 한 번 확인
+// 고정(📌)하지 않은 링크는 만든 날로부터 3일이 지나면(3일 전 생성분까지) 자동 삭제
+// + 같은 날 중복 클릭 확인용 캐시(clicks.json)에서 지난 날짜 기록도 같이 비움
+const LINK_RETENTION_DAYS = 3;
+function cleanupOldLinks() {
+  try {
+    const links = loadLinks();
+    const clicks = loadClicks();
+    const today = getTodayKST();
+    const cutoff = addDaysToTodayKST(-LINK_RETENTION_DAYS);
+    let linksChanged = false;
+    let clicksChanged = false;
+    let removedCount = 0;
+
+    for (const code in links) {
+      const link = links[code];
+      if (!link.createdAt) {
+        // 생성일 기록이 없던 예전 링크는 첫 클릭 날짜를 생성일로 봄 (클릭도 없으면 오늘부터 계산)
+        link.createdAt = Object.keys(link.dailyClicks || {}).sort()[0] || today;
+        linksChanged = true;
+      }
+      if (!link.pinned && link.createdAt <= cutoff) {
+        delete links[code];
+        linksChanged = true;
+        removedCount++;
+      }
+    }
+    for (const code in clicks) {
+      for (const date in clicks[code]) {
+        if (date < today) {
+          delete clicks[code][date];
+          clicksChanged = true;
+        }
+      }
+      if (!links[code] || !Object.keys(clicks[code]).length) {
+        delete clicks[code];
+        clicksChanged = true;
+      }
+    }
+
+    if (linksChanged) saveLinks(links);
+    if (clicksChanged) saveClicks(clicks);
+    if (removedCount > 0) logActivity('(시스템)', `${LINK_RETENTION_DAYS}일 지난 링크 자동 삭제`, `${removedCount}개 (고정 링크 제외)`);
+    return removedCount;
+  } catch (e) {
+    return 0;
+  }
+}
+
+// 짧은 주소용 랜덤 코드 (헷갈리는 l, o, 0, 1은 뺌)
+const SHORT_CODE_CHARS = 'abcdefghijkmnpqrstuvwxyz23456789';
+function generateShortCode(links) {
+  for (;;) {
+    const code = Array.from(crypto.randomBytes(5), (b) => SHORT_CODE_CHARS[b % SHORT_CODE_CHARS.length]).join('');
+    if (!links[code]) return code;
+  }
+}
+
+// 1시간마다 만료된 사용자 링크 / 오래된 링크 정리, 서버 시작 1분 뒤에도 한 번 확인
 if (!cloudflareStorage.isCloudflare) {
-  setInterval(cleanupExpiredUserLinks, 60 * 60 * 1000).unref();
-  setTimeout(cleanupExpiredUserLinks, 60 * 1000).unref();
+  setInterval(() => { cleanupExpiredUserLinks(); cleanupOldLinks(); }, 60 * 60 * 1000).unref();
+  setTimeout(() => { cleanupExpiredUserLinks(); cleanupOldLinks(); }, 60 * 1000).unref();
 }
 
 // 아무 쿠팡 링크나 넣으면 내 파트너스 링크로 변환
 async function convertToDeeplink(coupangUrl, accessKey, secretKey) {
-  const resolvedUrl = await resolveToProductUrl(coupangUrl);
+  const followed = await followLink(coupangUrl).catch(() => ({ url: coupangUrl }));
+  const resolvedUrl = canonicalCoupangUrl(followed.url);
   const path = '/v2/providers/affiliate_open_api/apis/openapi/v1/deeplink';
   const authorization = generateCoupangAuth('POST', path, accessKey, secretKey);
   const res = await fetch('https://api-gateway.coupang.com' + path, {
@@ -551,9 +749,10 @@ app.get('/', (_req, res) => {
 app.post('/__cloudflare/maintenance', async (_req, res) => {
   if (!cloudflareStorage.isCloudflare) return res.sendStatus(404);
   try {
+    const removedOldLinks = cleanupOldLinks();
     const prices = await collectDailyPrices();
     const removedExpiredLinks = cleanupExpiredUserLinks();
-    res.json({ success: true, prices, removedExpiredLinks });
+    res.json({ success: true, prices, removedExpiredLinks, removedOldLinks });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -705,10 +904,11 @@ const FEATURE_GUIDE = [
   {
     title: '🔗 링크 관리 기본',
     items: [
-      '새 링크 등록: 코드·쿠팡/토스 링크·제목·설명·이미지·카테고리·만료일·알림단위 입력 후 등록',
-      '"자동변환": 아무 쿠팡 링크나 넣으면 내 파트너스 링크로 자동 변환',
-      '"🔍 상품 검색해서 채우기": 상품명 검색 → 사진/가격 보고 클릭하면 자동 입력',
-      '각 카드에서 "수정하기"/"삭제하기" 가능, 링크 복사 버튼과 QR코드도 제공'
+      '새 링크 등록: 상품 링크(또는 공유 문구 통째로)를 붙여넣으면 제목·이미지·가격·할인율이 자동으로 채워지고, 짧은 주소는 랜덤으로 만들어져요',
+      '쿠팡 링크는 다른 사람 파트너스 링크여도 등록된 쿠팡 API 키로 무조건 내 파트너스 링크로 바뀌어요',
+      '"🔍 상품 이름으로 검색해서 채우기": 상품명 검색 → 사진/가격 보고 클릭하면 자동 입력',
+      '링크 목록은 한 줄씩: "복사하기"는 🚆제목+가격+짧은 링크 공유 문구를, /r/코드를 누르면 짧은 링크만 복사해요',
+      '📌 고정하지 않은 링크는 만든 지 3일이 지나면 자동으로 정리돼요'
     ]
   },
   {
@@ -725,7 +925,6 @@ const FEATURE_GUIDE = [
     title: '📁 데이터 관리',
     items: [
       '📊 CSV 다운로드: 전체 링크·클릭 데이터를 엑셀 파일로 저장',
-      '카테고리별 필터 버튼으로 상품 목록 걸러보기',
       '만료일을 지정하면 그 날짜가 지난 링크는 자동으로 접속이 막혀요',
       '유입 경로(카카오톡/Threads/인스타/네이버/직접입력) 분석 표시'
     ]
@@ -1213,11 +1412,6 @@ app.get('/admin/edit/:code', (req, res) => {
           <label style="font-size:12px; color:#E0399B;">이미지 주소</label>
           <input type="text" name="image" id="editImageInput" value="${escapeHtml(link.image || '')}" oninput="updateEditPreview()">
           <img id="editImagePreview" src="${escapeHtml(link.image ? imgProxyUrl(host, link.image) : '')}" style="width:100%; max-height:180px; object-fit:cover; border-radius:16px; margin-bottom:16px; display:${link.image ? 'block' : 'none'}; background:#FFF5FA; border:1px solid rgba(255,111,181,0.24);" onerror="this.style.display='none';" onload="this.style.display='block';">
-          <label style="font-size:12px; color:#E0399B;">카테고리</label>
-          <select id="categorySelectEdit" onchange="onCategorySelectChange(this, 'categoryCustomEdit')" style="width:100%;">${categoryOptionsHtml(link.category || '')}</select>
-          <input type="text" id="categoryCustomEdit" name="category" value="${escapeHtml(link.category || '')}" placeholder="카테고리 직접 입력" style="display:${(link.category && !COUPANG_CATEGORIES.includes(link.category)) ? 'block' : 'none'};">
-          <label style="font-size:12px; color:#E0399B;">폴더</label>
-          <input type="text" name="folder" value="${escapeHtml(link.folder || '')}" placeholder="예: 여름프로모션">
           <label style="font-size:12px; color:#E0399B;">만료일 (선택)</label>
           <input type="date" name="expiresAt" value="${escapeHtml(link.expiresAt || '')}">
           <label style="font-size:12px; color:#E0399B;">클릭 알림 단위 (기본 100)</label>
@@ -1257,39 +1451,55 @@ app.get('/admin/edit/:code', (req, res) => {
           const img = document.getElementById('editImagePreview');
           if (val) { img.src = clientImgProxyUrl(val); } else { img.style.display = 'none'; }
         }
-        function onCategorySelectChange(select, customId) {
-          const custom = document.getElementById(customId);
-          if (select.value === '__custom__') {
-            custom.style.display = 'block';
-            custom.value = '';
-            custom.focus();
-          } else {
-            custom.style.display = 'none';
-            custom.value = select.value;
-          }
-        }
       </script>
     </body></html>
   `);
 });
 
-app.post('/admin/edit', (req, res) => {
+// 쿠팡 링크는 다른 사람 파트너스 링크여도 무조건 내 API 키로 변환해서 저장
+// (서버가 방금 변환해준 링크라는 서명이 있으면 다시 변환하지 않음)
+function missingCoupangKeysMessage(req) {
+  return isAdminUser(req) ? '관리자용 쿠팡 API 키가 설정되어 있지 않아요' : '쿠팡 링크를 내 파트너스 링크로 바꾸려면 먼저 "내 프로필"에서 쿠팡 API 키를 등록해주세요';
+}
+
+async function ensureMyCoupangLink(req, url, urlSig) {
+  if (!isCoupangUrl(url)) return url;
+  if (urlSig && urlSig === signConvertedUrl(getCurrentUser(req), url)) return url;
+  const keys = getEffectiveCoupangKeys(req);
+  if (!keys) throw new Error(missingCoupangKeysMessage(req));
+  return convertToDeeplink(url, keys.accessKey, keys.secretKey);
+}
+
+function sendFormError(res, message) {
+  res.status(400).send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">${THEME_STYLE}</head>
+    <body style="padding:32px;">${RADAR_BG}
+      <div class="glass" style="max-width:420px; padding:28px; margin:0 auto;">
+        <div style="font-size:14px; color:#ff3860; margin-bottom:14px;">⚠ ${escapeHtml(message)}</div>
+        <a href="javascript:history.back()" style="font-size:13px;">← 돌아가기</a>
+      </div>
+    </body></html>`);
+}
+
+app.post('/admin/edit', async (req, res) => {
   if (!isLoggedIn(req)) return res.redirect('/admin/login');
-  const { code, url, title, description, image, category, expiresAt, milestoneStep, folder, price, discountRate, abGroup, abVariant } = req.body;
+  const { code, url, title, description, image, expiresAt, milestoneStep, price, discountRate, abGroup, abVariant } = req.body;
   const links = loadLinks();
   if (!links[code]) return res.status(404).send('링크를 찾을 수 없어요');
   if (!isAdminUser(req) && links[code].owner !== getCurrentUser(req)) {
     return res.status(403).send('이 링크에 대한 권한이 없어요');
   }
 
-  links[code].url = url;
+  const newUrl = extractFirstUrl(url) || String(url || '').trim();
+  try {
+    links[code].url = newUrl === links[code].url ? newUrl : await ensureMyCoupangLink(req, newUrl);
+  } catch (e) {
+    return sendFormError(res, '쿠팡 링크 변환 실패: ' + e.message);
+  }
   links[code].title = title || '';
   links[code].description = description || '';
   links[code].image = cleanImageUrl(image) || '';
-  links[code].category = category || '';
   links[code].expiresAt = expiresAt || '';
   links[code].milestoneStep = parseInt(milestoneStep, 10) || 100;
-  links[code].folder = folder || '';
   links[code].price = price ? parseInt(price, 10) : null;
   links[code].discountRate = discountRate ? parseInt(discountRate, 10) : null;
   links[code].abGroup = abGroup || '';
@@ -1299,26 +1509,50 @@ app.post('/admin/edit', (req, res) => {
   res.redirect('/admin');
 });
 
-app.post('/admin/api/convert', async (req, res) => {
+// 링크(또는 공유 문구)를 붙여넣으면 제목·이미지·가격·할인율을 찾아주고, 쿠팡이면 내 파트너스 링크로 변환
+// GET이라 요청 조정기(Durable Object)를 거치지 않아서, 느려도 클릭 리다이렉트를 막지 않음
+app.get('/admin/api/product-info', async (req, res) => {
   if (!isLoggedIn(req)) return res.status(401).json({ success: false, error: '로그인이 필요해요' });
-  const keys = getEffectiveCoupangKeys(req);
-  if (!keys) {
-    return res.json({ success: false, error: isAdminUser(req) ? '관리자용 쿠팡 API 키가 설정되어 있지 않아요' : '먼저 "내 프로필"에서 쿠팡 API 키를 등록해주세요' });
-  }
+  const text = String(req.query.text || '').slice(0, 4000);
+  const inputUrl = extractFirstUrl(text);
+  if (!inputUrl) return res.json({ success: false, error: '붙여넣은 내용에서 링크를 찾지 못했어요' });
+
+  const info = { url: inputUrl, urlSig: '', converted: false, image: '', ...parseShareText(text, inputUrl) };
   try {
-    const converted = await convertToDeeplink(req.body.url, keys.accessKey, keys.secretKey);
-    res.json({ success: true, url: converted });
+    const page = await followLink(inputUrl).catch(() => ({ url: inputUrl, html: '' }));
+    if (isCoupangUrl(page.url) || isCoupangUrl(inputUrl)) {
+      const keys = getEffectiveCoupangKeys(req);
+      if (!keys) return res.json({ success: false, error: missingCoupangKeysMessage(req) });
+      const productUrl = canonicalCoupangUrl(page.url);
+      const [deeplink, product] = await Promise.all([
+        convertToDeeplink(productUrl, keys.accessKey, keys.secretKey),
+        findCoupangProduct(productUrl, info.title, keys.accessKey, keys.secretKey)
+      ]);
+      info.url = deeplink;
+      info.urlSig = signConvertedUrl(getCurrentUser(req), deeplink);
+      info.converted = true;
+      if (product) {
+        info.title = product.productName || info.title;
+        info.image = product.productImage || '';
+        info.price = parsePriceNumber(product.productPrice) || info.price;
+      }
+    } else if (page.html) {
+      const meta = parseProductMeta(page.html, page.url);
+      info.title = meta.title || info.title || meta.pageTitle;
+      info.image = meta.image;
+      info.price = meta.price || info.price;
+      info.discountRate = meta.discountRate || info.discountRate;
+    }
+    res.json({ success: true, ...info });
   } catch (e) {
-    res.json({ success: false, error: e.message });
+    res.json({ success: false, error: '쿠팡 링크 변환 실패: ' + e.message });
   }
 });
 
 app.get('/admin/api/search', async (req, res) => {
   if (!isLoggedIn(req)) return res.status(401).json({ success: false, error: '로그인이 필요해요' });
   const keys = getEffectiveCoupangKeys(req);
-  if (!keys) {
-    return res.json({ success: false, error: isAdminUser(req) ? '관리자용 쿠팡 API 키가 설정되어 있지 않아요' : '먼저 "내 프로필"에서 쿠팡 API 키를 등록해주세요', products: [] });
-  }
+  if (!keys) return res.json({ success: false, error: missingCoupangKeysMessage(req), products: [] });
   try {
     const products = await searchCoupangProducts(req.query.keyword || '', keys.accessKey, keys.secretKey);
     res.json({ success: true, products });
@@ -1335,22 +1569,6 @@ const DEFAULT_DISCLOSURES = {
 };
 function getDisclosureTexts(user) {
   return Object.assign({}, DEFAULT_DISCLOSURES, (user && user.disclosureTexts) || {});
-}
-
-const COUPANG_CATEGORIES = [
-  '로켓프레시', '도서/음반/DVD', '완구/취미', '스포츠/레저용품', '가전디지털',
-  '가구/홈인테리어', 'R.LUX', '출산/유아동', 'Fashion', '뷰티',
-  '반려동물용품', '생활용품', '자동차용품', '문구/오피스', '주방용품',
-  '식품', '국내투어', '패션잡화'
-];
-function categoryOptionsHtml(selected) {
-  const isCustom = selected && !COUPANG_CATEGORIES.includes(selected);
-  let html = '<option value="">카테고리 선택 안 함</option>';
-  html += COUPANG_CATEGORIES.map((c) =>
-    `<option value="${escapeHtml(c)}" ${selected === c ? 'selected' : ''}>${escapeHtml(c)}</option>`
-  ).join('');
-  html += `<option value="__custom__" ${isCustom ? 'selected' : ''}>✏️ 직접 입력</option>`;
-  return html;
 }
 
 // 네이버쇼핑커넥트 등에서 이미지 주소를 복사할 때 따옴표까지 같이 섞여 들어오는 경우가 있어서 자동으로 정리
@@ -1537,13 +1755,13 @@ app.get('/admin/export.csv', (req, res) => {
   const links = getVisibleLinks(req);
   const today = getTodayKST();
   const host = req.protocol + '://' + req.get('host');
-  const rows = [['코드', '제목', '플랫폼', '카테고리', '짧은링크', '원본링크', '오늘클릭', '누적클릭', '만료일']];
+  const rows = [['코드', '제목', '플랫폼', '짧은링크', '원본링크', '오늘클릭', '누적클릭', '만료일']];
   for (const code in links) {
     const link = links[code];
     const todayClicks = (link.dailyClicks && link.dailyClicks[today]) || 0;
     const totalAllTime = Object.values(link.dailyClicks || {}).reduce((a, b) => a + b, 0);
     rows.push([
-      code, link.title || '', detectPlatform(link.url), link.category || '',
+      code, link.title || '', detectPlatform(link.url),
       `${host}/r/${code}`, link.url, todayClicks, totalAllTime, link.expiresAt || ''
     ]);
   }
@@ -1570,134 +1788,48 @@ app.get('/admin', (req, res) => {
   const stats = computeStats(links, today);
   const { platforms, totalToday, totalDaily, totalTodayAll, totalDailyAll, overallRanking, platformRanking } = stats;
 
-  let cards = '';
+  let rows = '';
   let idx = 0;
-  const categorySet = new Set();
-  const folderSet = new Set();
-  const sourceLabels = { kakao: '카카오톡', threads: 'Threads', instagram: '인스타', naver_app: '네이버', direct: '직접입력', other: '기타' };
+  const rowData = { totalClicks: {}, linkTitles: {}, milestoneStep: {}, shareInfo: {}, priceHistoryAll: {} };
 
-  const sortedCodes = Object.keys(links).sort((a, b) => (links[b].pinned ? 1 : 0) - (links[a].pinned ? 1 : 0));
+  // 고정한 링크 먼저, 그 다음은 최근에 만든 링크가 위로 오게
+  const sortedCodes = Object.keys(links).reverse().sort((a, b) => (links[b].pinned ? 1 : 0) - (links[a].pinned ? 1 : 0));
   for (const code of sortedCodes) {
     idx++;
     const link = links[code];
     const shortUrl = `${host}/r/${code}`;
     const todayClicks = stats.perLink[code].todayClicks;
     const totalAllTime = stats.perLink[code].totalAllTime;
-    const platform = stats.perLink[code].platform;
-    const category = link.category || '';
-    if (category) categorySet.add(category);
-    const folder = link.folder || '';
-    if (folder) folderSet.add(folder);
-    const expired = isExpired(link);
-    const milestoneStep = link.milestoneStep || 100;
-
-    const dailyData = JSON.stringify(link.dailyClicks || {});
-    const chartId = `chart_${idx}`;
+    const title = link.title || code;
+    const rowId = `row_${idx}`;
     const proxiedImg = link.image ? imgProxyUrl(host, link.image) : '';
     const imgSrc = proxiedImg ? `${escapeHtml(proxiedImg)}${proxiedImg.includes('?') ? '&' : '?'}v=${idx}` : '';
-    const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=70x70&data=${encodeURIComponent(shortUrl)}`;
+    const priceHtml = link.price
+      ? `<span class="yellow-emph" style="color:#E0A200; font-weight:800;">${link.price.toLocaleString()}원</span>${link.discountRate ? ` <span style="color:#ff3860;">${link.discountRate}%↓</span>` : ''} · `
+      : '';
 
-    const sourceEntries = Object.entries(link.sourceClicks || {}).sort((a, b) => b[1] - a[1]).slice(0, 3);
-    const sourceHtml = sourceEntries.length
-      ? sourceEntries.map(([k, v]) => `${sourceLabels[k] || k} ${v}`).join(' · ')
-      : '아직 유입 기록 없음';
+    rowData.totalClicks[code] = totalAllTime;
+    rowData.linkTitles[code] = title;
+    rowData.milestoneStep[code] = link.milestoneStep || 100;
+    rowData.shareInfo[code] = { title, price: link.price || 0, discountRate: link.discountRate || 0, shortUrl, platform: stats.perLink[code].platform };
+    if (Object.keys(link.priceHistory || {}).length) rowData.priceHistoryAll[code] = { history: link.priceHistory, title };
 
-    const countryEntries = Object.entries(link.countryClicks || {}).sort((a, b) => b[1] - a[1]).slice(0, 3);
-    const countryHtml = countryEntries.length
-      ? countryEntries.map(([k, v]) => `${escapeHtml(k)} ${v}`).join(' · ')
-      : '아직 지역 기록 없음';
-
-    cards += `
-      <div class="card glass" data-code="${escapeHtml(code)}" data-chart-id="${chartId}" data-category="${escapeHtml(category)}" data-folder="${escapeHtml(folder)}">
-        <div style="display:flex; gap:10px; margin-bottom:8px;">
-          ${imgSrc ? `<img src="${imgSrc}" class="thumb" style="flex:1; margin-bottom:0;" onclick="copyText('${escapeHtml(link.image)}', this)" title="클릭하면 사진 링크가 복사돼요">` : '<div style="flex:1;"></div>'}
+    rows += `
+      <div class="link-row glass" data-code="${escapeHtml(code)}" data-row-id="${rowId}">
+        <button type="button" class="row-pin" onclick="document.getElementById('pinform_${rowId}').submit();" title="${link.pinned ? '고정 해제' : '고정하면 3일이 지나도 자동 삭제되지 않아요'}">${link.pinned ? '📌' : '📍'}</button>
+        <form id="pinform_${rowId}" method="POST" action="/admin/toggle-pin" style="display:none;"><input type="hidden" name="code" value="${escapeHtml(code)}"></form>
+        ${imgSrc ? `<img src="${imgSrc}" class="row-thumb" alt="" onerror="this.style.visibility='hidden';">` : '<div class="row-thumb"></div>'}
+        <div class="row-main">
+          <div class="row-title" title="${escapeHtml(title)}">${escapeHtml(title)}</div>
+          <div class="row-sub">${priceHtml}<span class="row-link" onclick="copyText('${shortUrl}', this)" title="클릭하면 짧은 링크만 복사돼요">/r/${escapeHtml(code)}</span>${isExpired(link) ? ' · <span style="color:#ff3860;">만료됨</span>' : ''}</div>
         </div>
-        <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-          <button type="button" onclick="event.preventDefault(); document.getElementById('pinform_${chartId}').submit();" title="${link.pinned ? '고정 해제' : '즐겨찾기 고정'}" style="background:none; border:none; font-size:20px; cursor:pointer; flex-shrink:0; padding:0; line-height:1;">${link.pinned ? '📌' : '📍'}</button>
-          <form id="pinform_${chartId}" method="POST" action="/admin/toggle-pin" style="display:none;"><input type="hidden" name="code" value="${escapeHtml(code)}"></form>
-          <div class="card-title" style="margin:0;">${escapeHtml(link.title || code)}</div>
-        </div>
-        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">
-          ${category ? `<span class="dest-label" style="background:rgba(255,111,181,0.16); color:#E0399B;">${escapeHtml(category)}</span>` : ''}
-          ${folder ? `<span class="dest-label" style="background:rgba(176,132,245,0.18); color:#8A4FE0;">📁 ${escapeHtml(folder)}</span>` : ''}
-          ${link.abGroup ? `<span class="dest-label yellow-emph" style="background:rgba(255,196,0,0.15); color:#E0A200;">AB:${escapeHtml(link.abGroup)}-${escapeHtml(link.abVariant || '?')}</span>` : ''}
-          ${expired ? `<span class="dest-label" style="background:rgba(255,56,96,0.2); color:#ff3860;">만료됨</span>` : (link.expiresAt ? `<span class="dest-label" style="background:rgba(176,132,245,0.15); color:#8A4FE0;">~${escapeHtml(link.expiresAt)}</span>` : '')}
-        </div>
-        ${link.price ? `<div class="yellow-emph" style="font-size:13px; color:#E0A200; font-weight:800; margin-bottom:6px;">${link.price.toLocaleString()}원${link.discountRate ? ` <span style="font-size:11px; color:#ff3860;">${link.discountRate}%↓</span>` : ''}</div>` : ''}
-        ${(() => {
-          const ph = link.priceHistory || {};
-          const dates = Object.keys(ph).sort();
-          if (dates.length === 0) return '';
-          const latest = ph[dates[dates.length - 1]];
-          const prev = dates.length > 1 ? ph[dates[dates.length - 2]] : null;
-          let diffHtml = '';
-          if (prev !== null && prev !== latest) {
-            const diff = latest - prev;
-            diffHtml = diff > 0
-              ? `<span style="color:#ff3860;">▲${diff.toLocaleString()}</span>`
-              : `<span style="color:#3FBFA6;">▼${Math.abs(diff).toLocaleString()}</span>`;
-          }
-          const allValues = dates.map((d) => ph[d]);
-          const lowest = Math.min(...allValues);
-          const lowestHtml = latest === lowest
-            ? `<span style="color:#3FBFA6;">🏆 역대 최저가!</span>`
-            : `<span style="opacity:0.7;">역대 최저 ${lowest.toLocaleString()}원 대비 +${(latest - lowest).toLocaleString()}원</span>`;
-          const priceChartId = 'pricechart_' + chartId;
-          return `
-            <div style="font-size:10px; color:#8A6A93; margin-bottom:2px;">🏷️ 쿠팡 실시간가 ${latest.toLocaleString()}원 ${diffHtml} <span style="opacity:0.6;">(${escapeHtml(dates[dates.length - 1])} 수집)</span></div>
-            <div style="font-size:9px; color:#8A6A93; margin-bottom:6px;">${lowestHtml}</div>
-            ${dates.length >= 2 ? `<div style="height:44px; position:relative; margin-bottom:8px;"><canvas id="${priceChartId}"></canvas></div>
-            <script>
-              window.__priceData_${priceChartId} = ${JSON.stringify(ph)};
-              window.__priceHistoryAll = window.__priceHistoryAll || {};
-              window.__priceHistoryAll[${JSON.stringify(code)}] = { history: ${JSON.stringify(ph)}, title: ${JSON.stringify(link.title || code)} };
-            </script>` : ''}
-          `;
-        })()}
-        <div class="pill-row">
-          <div class="pill">🔗 ${shortUrl}</div>
-          <button type="button" class="copy-btn" onclick="copyText('${shortUrl}', this)">복사</button>
-        </div>
-        <div class="dest">
-          <span class="dest-label">연결 링크</span>
-          <a href="${link.url}" target="_blank">${link.url}</a>
-        </div>
-        <div style="font-size:10px; color:#8A6A93; margin-bottom:4px;">📥 ${sourceHtml}</div>
-        <div style="font-size:10px; color:#8A6A93; margin-bottom:8px;">🌍 ${countryHtml}</div>
-        <button type="button" class="copy-btn" style="width:100%; margin-bottom:8px;" onclick='copyPromoText(${JSON.stringify(escapeHtml(link.title || code))}, ${link.price || 0}, ${link.discountRate || 0}, ${JSON.stringify(shortUrl)}, ${JSON.stringify(platform)})'>💬 카톡 공유 문구 복사</button>
-        <div class="clicks mono" id="clicks_${chartId}">${todayClicks} <span>오늘 클릭</span></div>
-        <div style="font-size:10px; color:#8A6A93; margin-top:-6px; margin-bottom:8px;" id="cum_${chartId}">누적 ${totalAllTime}회</div>
-
-        <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:8px;">
-          <div class="chart-controls" style="margin-bottom:0;">
-            <button class="range-btn active" data-range="30" data-target="${chartId}">1개월</button>
-            <button class="range-btn" data-range="60" data-target="${chartId}">2개월</button>
-            <button class="range-btn" data-range="90" data-target="${chartId}">3개월</button>
-            <button class="range-btn" data-range="all" data-target="${chartId}">전체</button>
-          </div>
-          <img src="${qrSrc}" title="QR코드 (클릭하면 짧은 링크 복사)" style="width:40px; height:40px; border-radius:10px; background:#fff; padding:2px; cursor:pointer; flex-shrink:0;" onclick="copyText('${shortUrl}', this)">
-        </div>
-        <div style="height:90px; position:relative;"><canvas id="${chartId}"></canvas></div>
-
-        <div class="action-row">
-          <a href="/admin/edit/${encodeURIComponent(code)}" class="edit-btn">수정하기</a>
-          <form method="POST" action="/admin/delete" onsubmit="return confirm('${escapeHtml(code)} 링크를 삭제할까요? 되돌릴 수 없어요.');" class="delete-form">
-            <input type="hidden" name="code" value="${escapeHtml(code)}">
-            <button type="submit" class="delete-btn">삭제하기</button>
-          </form>
-        </div>
-
-        <script>
-          window.__data_${chartId} = ${dailyData};
-          window.__totalClicks = window.__totalClicks || {};
-          window.__totalClicks[${JSON.stringify(code)}] = ${totalAllTime};
-          window.__linkTitles = window.__linkTitles || {};
-          window.__linkTitles[${JSON.stringify(code)}] = ${JSON.stringify(link.title || code)};
-          window.__milestoneStep = window.__milestoneStep || {};
-          window.__milestoneStep[${JSON.stringify(code)}] = ${milestoneStep};
-          window.__linkFull = window.__linkFull || {};
-          window.__linkFull[${JSON.stringify(code)}] = { title: ${JSON.stringify(link.title || code)}, today: ${todayClicks}, total: ${totalAllTime}, platform: ${JSON.stringify(detectPlatform(link.url))}, category: ${JSON.stringify(category)} };
-        </script>
+        <div class="row-clicks mono" id="clicks_${rowId}" title="오늘 클릭 / 누적 클릭">${todayClicks}<span>누적 ${totalAllTime}</span></div>
+        <button type="button" class="row-copy" onclick="copyPromoText(this.closest('.link-row').dataset.code, this)">복사하기</button>
+        <a href="/admin/edit/${encodeURIComponent(code)}" class="row-icon" title="수정하기">✏️</a>
+        <form method="POST" action="/admin/delete" onsubmit="return confirm('${escapeHtml(code)} 링크를 삭제할까요? 되돌릴 수 없어요.');" style="margin:0; flex-shrink:0;">
+          <input type="hidden" name="code" value="${escapeHtml(code)}">
+          <button type="submit" class="row-icon" title="삭제하기">🗑️</button>
+        </form>
       </div>
     `;
   }
@@ -1768,31 +1900,21 @@ app.get('/admin', (req, res) => {
       .total-num { font-size: 46px; font-weight: 800; line-height: 1; color: #E0399B; font-family: 'Baloo 2', sans-serif; }
       .total-label { font-size: 12px; color: #8A6A93; margin-top: 8px; letter-spacing: 0.5px; margin-bottom: 16px; }
       .form-box { padding: 22px; }
-      .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-      @media (max-width: 1100px) { .grid { grid-template-columns: repeat(2, 1fr); } }
-      @media (max-width: 620px) { .grid { grid-template-columns: 1fr; } }
-      .card { padding: 16px; overflow: visible; position: relative; z-index: 1; }
-      .card > * { position: relative; z-index: 3; }
-      .card::before {
-        content: ''; position: absolute; top: 0; left: 16px; right: 16px; height: 3px; border-radius: 3px;
-        background: linear-gradient(90deg, transparent, #FF6FB5, #B084F5, transparent);
-        z-index: 2;
-      }
-      .thumb { width: 100%; height: 100px; object-fit: cover; border-radius: 14px; margin-bottom: 10px; border: 1px solid rgba(255,111,181,0.24); cursor: pointer; transition: opacity 0.15s; }
-      .thumb:hover { opacity: 0.85; }
-      .card-title { font-size: 14px; font-weight: 800; margin-bottom: 8px; color: #4A2545; }
-      .pill-row { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
-      .pill { display: inline-block; background: rgba(255,111,181,0.12); border: 1px solid rgba(255,111,181,0.28); color: #E0399B; font-weight: 600; padding: 5px 10px; border-radius: 999px; font-size: 10px; word-break: break-all; flex: 1; min-width: 0; }
-      .copy-btn { background: rgba(176,132,245,0.16); border: 1px solid rgba(176,132,245,0.34); color: #8A4FE0; font-weight: 700; padding: 5px 9px; border-radius: 999px; font-size: 10px; flex-shrink: 0; }
-      .dest { background: rgba(255,111,181,0.06); border: 1px solid rgba(255,111,181,0.18); border-radius: 12px; padding: 9px; margin-bottom: 10px; font-size: 10px; }
-      .dest-label { display: inline-block; background: rgba(255,111,181,0.18); color: #E0399B; border-radius: 6px; padding: 2px 6px; font-size: 9px; margin-right: 6px; letter-spacing: 0.5px; }
-      .dest a { color: #8A6A93; text-decoration: none; word-break: break-all; }
-      .clicks { font-size: 22px; font-weight: 800; margin-bottom: 8px; color: #E0A200; }
-      .clicks span { font-size: 10px; color: #8A6A93; font-weight: normal; margin-left: 6px; letter-spacing: 0.5px; }
+      .link-list { display: flex; flex-direction: column; gap: 8px; }
+      .link-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 16px; }
+      .row-pin { background: none; border: none; font-size: 16px; padding: 0; line-height: 1; flex-shrink: 0; }
+      .row-thumb { width: 40px; height: 40px; border-radius: 10px; object-fit: cover; flex-shrink: 0; background: #FFF5FA; border: 1px solid rgba(255,111,181,0.24); }
+      .row-main { flex: 1; min-width: 0; }
+      .row-title { font-size: 13px; font-weight: 700; color: #4A2545; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .row-sub { font-size: 11px; color: #8A6A93; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+      .row-link { color: #B84FD6; cursor: pointer; }
+      .row-clicks { flex-shrink: 0; text-align: right; font-size: 16px; font-weight: 800; color: #E0A200; line-height: 1.1; min-width: 40px; }
+      .row-clicks span { display: block; font-size: 9px; font-weight: 500; color: #8A6A93; font-family: 'Noto Sans KR', sans-serif; }
+      .row-copy { flex-shrink: 0; background: rgba(176,132,245,0.16); border: 1px solid rgba(176,132,245,0.34); color: #8A4FE0; font-weight: 700; padding: 6px 11px; border-radius: 999px; font-size: 11px; white-space: nowrap; }
+      .row-icon { flex-shrink: 0; background: none; border: none; font-size: 14px; padding: 4px; text-decoration: none; line-height: 1; }
+      @media (max-width: 520px) { .row-thumb { display: none; } .link-row { gap: 6px; padding: 10px; } .row-copy { padding: 6px 8px; } }
       .chart-controls { margin-bottom: 6px; }
       .range-btn { background: rgba(255,111,181,0.1); border: 1px solid rgba(255,111,181,0.22); color: #8A6A93; padding: 3px 8px; border-radius: 999px; font-size: 9px; margin-right: 4px; cursor: pointer; }
-      .cat-btn { background: rgba(255,111,181,0.08); border: 1px solid rgba(255,111,181,0.22); color: #8A6A93; padding: 7px 16px; border-radius: 999px; font-size: 12px; cursor: pointer; }
-      .cat-btn.active { background: rgba(255,111,181,0.24); border-color: #FF6FB5; color: #E0399B; }
       .sub-btn { background: rgba(176,132,245,0.1); border: 1px solid rgba(176,132,245,0.25); color: #8A6A93; padding: 4px 8px; border-radius: 6px; font-size: 10px; cursor: pointer; }
       .sub-btn.active { background: rgba(176,132,245,0.28); border-color: #B084F5; color: #4A2545; font-weight: 700; }
       .cmp-select { background: rgba(255,255,255,0.9); color: #4A2545; border: 1px solid rgba(255,111,181,0.24); border-radius: 12px; padding: 8px 10px; font-size: 12px; }
@@ -1800,10 +1922,6 @@ app.get('/admin', (req, res) => {
       .cal-text { color: #4A2545; }
       .cal-text-sub { color: #8A6A93; }
       .range-btn.active { background: rgba(255,111,181,0.22); border-color: #FF6FB5; color: #E0399B; }
-      .action-row { display: flex; gap: 6px; margin-top: 10px; }
-      .edit-btn { flex: 1; text-align:center; background: rgba(176,132,245,0.14); color: #8A4FE0; border: 1px solid rgba(176,132,245,0.28); padding: 6px 10px; border-radius: 10px; font-size: 11px; text-decoration:none; }
-      .delete-form { flex: 1; margin: 0; }
-      .delete-btn { background: rgba(255,56,96,0.1); color: #ff3860; border: 1px solid rgba(255,56,96,0.28); padding: 6px 10px; border-radius: 10px; font-size: 11px; width: 100%; }
       .unit-price { font-size: 11px; color: #B84FD6; margin-top: 2px; }
     </style>
   </head>
@@ -2016,32 +2134,26 @@ app.get('/admin', (req, res) => {
 
       <div class="form-box glass" style="margin-bottom:32px;">
         <div class="eyebrow" style="margin-bottom:14px;">🔗 새 링크 만들기</div>
-        <form method="POST" action="/admin/create">
-          <input type="text" name="code" id="codeInput" placeholder="짧은 코드 (예: test1)" required onblur="checkDuplicateCode()">
-          <div style="display:flex; gap:8px; margin-bottom:4px;">
-            <input type="text" name="url" id="urlInput" placeholder="쿠팡/토스 링크" style="flex:1; margin-bottom:0;" onpaste="extractUrlOnPaste(event)" oninput="checkDuplicateUrl()" required>
-            <button type="button" onclick="convertLink()" class="btn-ghost" style="white-space:nowrap;">자동변환</button>
+        <form method="POST" action="/admin/create" id="createForm" onsubmit="return onCreateSubmit(event)">
+          <div style="display:flex; gap:8px; margin-bottom:6px;">
+            <input type="text" name="url" id="urlInput" placeholder="상품 링크나 공유 문구를 붙여넣으세요 (다른 사람 링크도 OK)" style="flex:1; margin-bottom:0;" onpaste="onUrlPaste(event)" onchange="onUrlChange()" oninput="checkDuplicateUrl()" required>
+            <button type="button" onclick="loadProductInfo()" class="btn-ghost" style="white-space:nowrap;">불러오기</button>
           </div>
+          <div id="productInfoStatus" style="font-size:11px; color:#8A6A93; min-height:16px; margin-bottom:6px;">쿠팡 링크는 자동으로 내 파트너스 링크로 바뀌고, 짧은 주소는 랜덤으로 만들어져요</div>
           <div id="duplicateWarning" style="font-size:11px; color:#ff3860; margin-bottom:8px; display:none;">⚠ 이미 등록된 링크와 같아요</div>
-          <button type="button" onclick="openSearchModal()" class="btn-ghost" style="width:100%; margin-bottom:12px;">🔍 상품 검색해서 채우기</button>
-          <div style="display:flex; gap:12px;">
-            <div style="flex:1;">
-              <input type="text" name="title" id="titleInput" placeholder="제목 (미리보기에 보일 이름)">
-              <input type="text" name="description" placeholder="설명 (선택)">
-              <input type="text" name="image" id="createImageInput" placeholder="이미지 주소 (선택, https://...)" oninput="updateCreatePreview()">
+          <div style="display:flex; gap:12px; align-items:flex-start;">
+            <img id="createImagePreview" style="width:96px; height:96px; object-fit:cover; border-radius:16px; display:none; background:#FFF5FA; border:1px solid rgba(255,111,181,0.24); flex-shrink:0;" onerror="this.style.display='none';" onload="this.style.display='block';">
+            <div style="flex:1; min-width:0;">
+              <input type="text" name="title" id="titleInput" placeholder="제목 (자동으로 채워져요)">
+              <input type="text" name="image" id="createImageInput" placeholder="이미지 주소 (자동으로 채워져요)" oninput="updateCreatePreview()">
+              <div id="createPriceLine" class="yellow-emph" style="font-size:13px; font-weight:800; color:#E0A200; margin:-4px 0 12px; display:none;"></div>
             </div>
-            <img id="createImagePreview" style="width:160px; height:130px; object-fit:cover; border-radius:16px; display:none; background:#FFF5FA; border:1px solid rgba(255,111,181,0.24); flex-shrink:0;" onerror="this.style.display='none';" onload="this.style.display='block';">
           </div>
-          <div style="display:flex; gap:8px;">
-            <select id="categorySelectNew" onchange="onCategorySelectChange(this, 'categoryCustomNew')" style="flex:1;">${categoryOptionsHtml('')}</select>
-            <input type="text" id="categoryCustomNew" name="category" placeholder="카테고리 직접 입력" style="display:none; flex:1;">
-            <input type="text" name="folder" placeholder="폴더 (선택, 예: 여름프로모션)" style="flex:1;">
-          </div>
-          <div style="display:flex; gap:8px;">
-            <input type="number" name="price" placeholder="가격 (선택, 원)" style="flex:1;">
-            <input type="number" name="discountRate" placeholder="할인율% (선택)" style="flex:1;">
-          </div>
-          <button type="submit" class="btn-primary" style="width:100%;">등록하기</button>
+          <input type="hidden" name="price" id="priceInput">
+          <input type="hidden" name="discountRate" id="discountRateInput">
+          <input type="hidden" name="urlSig" id="urlSigInput">
+          <button type="submit" id="createSubmitBtn" class="btn-primary" style="width:100%;">등록하기</button>
+          <button type="button" onclick="openSearchModal()" class="btn-ghost" style="width:100%; margin-top:10px;">🔍 상품 이름으로 검색해서 채우기</button>
         </form>
       </div>
 
@@ -2193,20 +2305,6 @@ app.get('/admin', (req, res) => {
       </div>
       ` : ''}
 
-      ${categorySet.size ? `
-      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;" id="categoryFilters">
-        <button type="button" class="cat-btn active" data-cat="__all__" onclick="filterByCategory('__all__', this)">전체</button>
-        ${[...categorySet].map(c => `<button type="button" class="cat-btn" data-cat="${escapeHtml(c)}" onclick="filterByCategory('${escapeHtml(c)}', this)">${escapeHtml(c)}</button>`).join('')}
-      </div>
-      ` : ''}
-
-      ${folderSet.size ? `
-      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;" id="folderFilters">
-        <button type="button" class="cat-btn active" data-folder="__all__" onclick="filterByFolder('__all__', this)">📁 전체 폴더</button>
-        ${[...folderSet].map(f => `<button type="button" class="cat-btn" data-folder="${escapeHtml(f)}" onclick="filterByFolder('${escapeHtml(f)}', this)">📁 ${escapeHtml(f)}</button>`).join('')}
-      </div>
-      ` : ''}
-
       ${(() => {
         const abGroups = {};
         for (const c in links) {
@@ -2237,7 +2335,15 @@ app.get('/admin', (req, res) => {
         `;
       })()}
 
-      <div class="grid" id="linkGrid">${cards}</div>
+      <div style="font-size:11px; color:#8A6A93; margin-bottom:8px;">📌 고정하지 않은 링크는 만든 지 ${LINK_RETENTION_DAYS}일이 지나면 자동으로 정리돼요</div>
+      <div class="link-list" id="linkList">${rows || '<div style="font-size:12px; color:#8A6A93;">아직 만든 링크가 없어요</div>'}</div>
+      <script>
+        window.__totalClicks = ${scriptJson(rowData.totalClicks)};
+        window.__linkTitles = ${scriptJson(rowData.linkTitles)};
+        window.__milestoneStep = ${scriptJson(rowData.milestoneStep)};
+        window.__shareInfo = ${scriptJson(rowData.shareInfo)};
+        window.__priceHistoryAll = ${scriptJson(rowData.priceHistoryAll)};
+      </script>
       </main>
     </div>
 
@@ -2290,40 +2396,85 @@ app.get('/admin', (req, res) => {
         return null;
       }
 
-      // 긴 공유 문구(공정위 문구+상품명+링크)를 붙여넣어도, 그 안의 인터넷 주소만 골라내서 넣어줌
-      function extractUrlOnPaste(e) {
+      // ===== 링크 붙여넣기 → 제목/이미지/가격/할인율 자동 채우기 + 쿠팡은 내 파트너스 링크로 변환 =====
+      let lastLoadedUrl = '';
+      let productInfoRequestId = 0;
+
+      function setProductStatus(text, color) {
+        const status = document.getElementById('productInfoStatus');
+        status.textContent = text;
+        status.style.color = color || '#8A6A93';
+      }
+
+      function updateCreatePriceLine() {
+        const price = parseInt(document.getElementById('priceInput').value, 10);
+        const rate = parseInt(document.getElementById('discountRateInput').value, 10);
+        const line = document.getElementById('createPriceLine');
+        line.textContent = price ? '💰 ' + price.toLocaleString() + '원' + (rate ? ' · ' + rate + '% 할인' : '') : '';
+        line.style.display = price ? 'block' : 'none';
+      }
+
+      // 긴 공유 문구(공정위 문구+상품명+가격+링크)를 붙여넣어도, 링크만 칸에 넣고 문구 전체로 상품 정보를 찾음
+      function onUrlPaste(e) {
         const text = (e.clipboardData || window.clipboardData).getData('text');
-        const match = text.match(/https?:\\/\\/\\S+/);
-        if (match) {
-          e.preventDefault();
-          let url = match[0];
-          // 링크 뒤에 붙어있을 수 있는 문장부호/괄호 등을 살짝 정리
-          url = url.replace(/[)\\]}.,!?"'>]+$/, '');
-          e.target.value = url;
+        if (!/https?:\\/\\//.test(text)) return;
+        e.preventDefault();
+        loadProductInfo(text);
+      }
+
+      function onUrlChange() {
+        const value = document.getElementById('urlInput').value.trim();
+        if (value && value !== lastLoadedUrl) loadProductInfo(value);
+      }
+
+      async function loadProductInfo(text) {
+        const input = document.getElementById('urlInput');
+        const submitBtn = document.getElementById('createSubmitBtn');
+        text = (text || input.value).trim();
+        const match = text.match(/https?:\\/\\/[^\\s<>"']+/);
+        if (!match) { setProductStatus('⚠ 링크를 먼저 붙여넣어주세요', '#ff3860'); return false; }
+        input.value = match[0].replace(/[)\\]}.,!?"'>]+$/, '');
+        ['titleInput', 'createImageInput', 'priceInput', 'discountRateInput', 'urlSigInput'].forEach((id) => { document.getElementById(id).value = ''; });
+        updateCreatePreview();
+        updateCreatePriceLine();
+
+        const requestId = ++productInfoRequestId;
+        setProductStatus('⏳ 상품 정보를 불러오는 중...');
+        submitBtn.disabled = true;
+        try {
+          const res = await fetch('/admin/api/product-info?text=' + encodeURIComponent(text));
+          const data = await res.json();
+          if (requestId !== productInfoRequestId) return false;
+          if (!data.success) { setProductStatus('⚠ ' + data.error, '#ff3860'); return false; }
+          input.value = data.url;
+          lastLoadedUrl = data.url;
+          document.getElementById('urlSigInput').value = data.urlSig || '';
+          document.getElementById('titleInput').value = data.title || '';
+          document.getElementById('createImageInput').value = data.image || '';
+          document.getElementById('priceInput').value = data.price || '';
+          document.getElementById('discountRateInput').value = data.discountRate || '';
+          updateCreatePreview();
+          updateCreatePriceLine();
+          checkDuplicateUrl();
+          const missing = [!data.title && '제목', !data.image && '이미지'].filter(Boolean);
+          setProductStatus((data.converted ? '✅ 내 파트너스 링크로 변환했어요' : '✅ 링크를 불러왔어요') +
+            (missing.length ? ' · ' + missing.join('/') + '은(는) 못 찾아서 직접 입력하거나 🔍 검색으로 채워주세요' : ''), missing.length ? '#E0A200' : '#3FBFA6');
+          return true;
+        } catch (e) {
+          if (requestId === productInfoRequestId) setProductStatus('⚠ 상품 정보를 불러오는 중 오류가 발생했어요', '#ff3860');
+          return false;
+        } finally {
+          if (requestId === productInfoRequestId) submitBtn.disabled = false;
         }
       }
 
-      async function convertLink() {
-        const input = document.getElementById('urlInput');
-        const original = input.value.trim();
-        if (!original) { alert('먼저 쿠팡 링크를 입력해주세요'); return; }
-        input.disabled = true;
-        try {
-          const res = await fetch('/admin/api/convert', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url: original })
-          });
-          const data = await res.json();
-          if (data.success) {
-            input.value = data.url;
-          } else {
-            alert('변환 실패: ' + data.error);
-          }
-        } catch (e) {
-          alert('변환 중 오류가 발생했어요');
-        }
-        input.disabled = false;
+      // 링크를 불러오기 전에 등록을 누르면, 먼저 불러온 다음 등록
+      function onCreateSubmit(e) {
+        const value = document.getElementById('urlInput').value.trim();
+        if (value === lastLoadedUrl) return true;
+        e.preventDefault();
+        loadProductInfo(value).then((ok) => { if (ok) document.getElementById('createForm').submit(); });
+        return false;
       }
 
       function openSearchModal() {
@@ -2375,9 +2526,15 @@ app.get('/admin', (req, res) => {
       function selectProduct(i) {
         const p = lastSearchResults[i];
         document.getElementById('urlInput').value = p.productUrl;
+        lastLoadedUrl = p.productUrl; // 내 키로 검색한 링크라 다시 불러올 필요 없음 (등록할 때 서버가 짧은 링크로 변환)
+        document.getElementById('urlSigInput').value = '';
         document.getElementById('titleInput').value = p.productName;
         document.getElementById('createImageInput').value = p.productImage;
+        document.getElementById('priceInput').value = p.productPrice || '';
+        document.getElementById('discountRateInput').value = '';
         updateCreatePreview();
+        updateCreatePriceLine();
+        setProductStatus('✅ 검색한 상품으로 채웠어요', '#3FBFA6');
         closeSearchModal();
       }
 
@@ -2527,42 +2684,7 @@ app.get('/admin', (req, res) => {
         });
       }
 
-      // ===== 가격 변동 미니 그래프 =====
-      function renderPriceCharts() {
-        document.querySelectorAll('canvas[id^="pricechart_"]').forEach((canvas) => {
-          const data = window['__priceData_' + canvas.id];
-          if (!data) return;
-          const dates = Object.keys(data).sort();
-          const values = dates.map((d) => data[d]);
-          new Chart(canvas, {
-            type: 'line',
-            data: {
-              labels: dates.map((d) => d.slice(5)),
-              datasets: [{
-                data: values,
-                borderColor: '#E0A200',
-                backgroundColor: 'rgba(224,162,0,0.12)',
-                fill: true,
-                tension: 0.25,
-                pointRadius: 2,
-                pointBackgroundColor: '#E0A200'
-              }]
-            },
-            options: {
-              responsive: true,
-              maintainAspectRatio: false,
-              plugins: { legend: { display: false }, tooltip: { enabled: true } },
-              scales: {
-                x: { display: false },
-                y: { display: false, beginAtZero: false }
-              }
-            }
-          });
-        });
-      }
-      renderPriceCharts();
-
-      document.querySelectorAll('.total-box, .card').forEach(box => {
+      document.querySelectorAll('.total-box').forEach(box => {
         const btn = box.querySelector('.range-btn.active');
         if (btn) renderChart(btn.dataset.target, '30');
       });
@@ -2576,32 +2698,6 @@ app.get('/admin', (req, res) => {
           renderChart(target, range === 'all' ? 'all' : parseInt(range));
         });
       });
-
-      // ===== 카테고리 + 폴더 필터 (같이 적용됨) =====
-      let currentCategoryFilter = '__all__';
-      let currentFolderFilter = '__all__';
-
-      function applyFilters() {
-        document.querySelectorAll('#linkGrid .card').forEach(card => {
-          const catOk = currentCategoryFilter === '__all__' || card.dataset.category === currentCategoryFilter;
-          const folderOk = currentFolderFilter === '__all__' || card.dataset.folder === currentFolderFilter;
-          card.style.display = (catOk && folderOk) ? '' : 'none';
-        });
-      }
-
-      function filterByCategory(cat, btn) {
-        currentCategoryFilter = cat;
-        document.querySelectorAll('#categoryFilters .cat-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        applyFilters();
-      }
-
-      function filterByFolder(folder, btn) {
-        currentFolderFilter = folder;
-        document.querySelectorAll('#folderFilters .cat-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        applyFilters();
-      }
 
       // ===== 사운드 시스템 (외부 음원 파일 없이 Web Audio API로 직접 합성) =====
       let audioCtx = null;
@@ -2780,10 +2876,10 @@ app.get('/admin', (req, res) => {
         \`).join('');
       }
 
-      // 카드의 code ↔ chartId 매핑 (한 번만 만들어둠)
-      const codeToChartId = {};
-      document.querySelectorAll('.card[data-code]').forEach(card => {
-        codeToChartId[card.dataset.code] = card.dataset.chartId;
+      // 링크 줄의 code ↔ rowId 매핑 (한 번만 만들어둠)
+      const codeToRowId = {};
+      document.querySelectorAll('.link-row[data-code]').forEach(row => {
+        codeToRowId[row.dataset.code] = row.dataset.rowId;
       });
 
       async function refreshDashboard() {
@@ -2811,21 +2907,17 @@ app.get('/admin', (req, res) => {
           const overallEl = document.getElementById('rankBody_all');
           if (overallEl) overallEl.innerHTML = buildRankingRowsClient(data.overallRanking, true);
 
-          // 각 상품 카드 숫자/그래프 갱신
+          // 각 링크 줄의 클릭 숫자 갱신
           for (const code in data.links) {
             const info = data.links[code];
-            const chartId = codeToChartId[code];
-            if (!chartId) continue;
+            const rowId = codeToRowId[code];
+            if (!rowId) continue;
 
-            const clicksEl = document.getElementById('clicks_' + chartId);
-            if (clicksEl) clicksEl.innerHTML = info.todayClicks + ' <span>오늘 클릭</span>';
-            const cumEl = document.getElementById('cum_' + chartId);
-            if (cumEl) cumEl.textContent = '누적 ' + info.totalAllTime + '회';
+            const clicksEl = document.getElementById('clicks_' + rowId);
+            if (clicksEl) clicksEl.innerHTML = info.todayClicks + '<span>누적 ' + info.totalAllTime + '</span>';
 
-            window['__data_' + chartId] = info.dailyClicks;
             window.__totalClicks[code] = info.totalAllTime;
             window.__linkTitles[code] = info.title;
-            rerenderIfVisible(chartId);
           }
 
           // 새로 갱신된 누적치 기준으로 마일스톤(100/1000 돌파) 다시 확인
@@ -2838,7 +2930,7 @@ app.get('/admin', (req, res) => {
       function rerenderIfVisible(chartId) {
         const ctx = document.getElementById(chartId);
         if (!ctx) return;
-        const activeBtn = ctx.closest('.total-box, .card')?.querySelector('.range-btn.active');
+        const activeBtn = ctx.closest('.total-box')?.querySelector('.range-btn.active');
         const range = activeBtn ? activeBtn.dataset.range : '30';
         renderChart(chartId, range === 'all' ? 'all' : parseInt(range));
       }
@@ -2852,34 +2944,23 @@ app.get('/admin', (req, res) => {
         btn.style.display = window.scrollY > 400 ? 'block' : 'none';
       });
 
-      // ===== 카카오톡 공유 문구 생성 =====
-      function copyPromoText(title, price, discountRate, shortUrl, platform) {
+      // ===== 카카오톡 공유 문구 생성 (제목 앞에 🚆) =====
+      function copyPromoText(code, el) {
+        const info = window.__shareInfo[code];
+        if (!info) return;
         const disclosures = window.__myDisclosures || {};
         let text = '';
-        if (platform && disclosures[platform]) {
-          text += disclosures[platform] + '\\n';
+        if (info.platform && disclosures[info.platform]) {
+          text += disclosures[info.platform] + '\\n';
         }
-        text += title + '\\n';
-        if (price) {
-          text += '💰 ' + price.toLocaleString() + '원';
-          if (discountRate) text += ' (' + discountRate + '% 할인)';
+        text += '🚆 ' + info.title + '\\n';
+        if (info.price) {
+          text += '💰 ' + info.price.toLocaleString() + '원';
+          if (info.discountRate) text += ' (' + info.discountRate + '% 할인)';
           text += '\\n';
         }
-        text += '🔗 ' + shortUrl;
-        copyText(text);
-        alert('공유 문구가 복사됐어요! 카카오톡에 붙여넣기 해보세요.');
-      }
-
-      function onCategorySelectChange(select, customId) {
-        const custom = document.getElementById(customId);
-        if (select.value === '__custom__') {
-          custom.style.display = 'block';
-          custom.value = '';
-          custom.focus();
-        } else {
-          custom.style.display = 'none';
-          custom.value = select.value;
-        }
+        text += '🔗 ' + info.shortUrl;
+        copyText(text, el);
       }
 
       // ===== 중복 링크 감지 =====
@@ -2896,23 +2977,6 @@ app.get('/admin', (req, res) => {
             warning.style.display = data.duplicate ? 'block' : 'none';
           } catch (e) {}
         }, 500);
-      }
-
-      // ===== 짧은 코드 중복 확인 =====
-      async function checkDuplicateCode() {
-        const code = document.getElementById('codeInput').value.trim();
-        if (!code) return;
-        try {
-          const res = await fetch('/admin/api/check-code?code=' + encodeURIComponent(code));
-          const data = await res.json();
-          if (data.duplicate) {
-            let msg = '"' + code + '"는 이미 존재하는 코드예요.';
-            if (data.lastNumber !== null) {
-              msg += '\\n같은 형식(' + data.prefix + '+숫자)의 마지막 번호는 ' + data.prefix + data.lastNumber + '예요. ' + data.prefix + (data.lastNumber + 1) + '부터 써보세요.';
-            }
-            alert(msg);
-          }
-        } catch (e) {}
       }
 
       // ===== 브라우저 알림 (탭이 열려있는 동안, 다른 화면 보고 있어도 표시됨) =====
@@ -3196,18 +3260,25 @@ app.get('/admin', (req, res) => {
   res.send(html);
 });
 
-app.post('/admin/create', (req, res) => {
+app.post('/admin/create', async (req, res) => {
   if (!isLoggedIn(req)) return res.redirect('/admin/login');
   const owner = getCurrentUser(req);
-  const { code, url, title, description, image, category, expiresAt, milestoneStep, folder, price, discountRate, abGroup, abVariant } = req.body;
+  const { url, urlSig, title, description, image, expiresAt, milestoneStep, price, discountRate, abGroup, abVariant } = req.body;
+  let finalUrl = extractFirstUrl(url) || String(url || '').trim();
+  if (!finalUrl) return sendFormError(res, '링크를 입력해주세요');
+  try {
+    finalUrl = await ensureMyCoupangLink(req, finalUrl, urlSig);
+  } catch (e) {
+    return sendFormError(res, '쿠팡 링크 변환 실패: ' + e.message);
+  }
   const links = loadLinks();
+  const code = generateShortCode(links);
   links[code] = {
-    url: url,
+    url: finalUrl,
     title: title || '',
     description: description || '',
     image: cleanImageUrl(image) || '',
-    category: category || '',
-    folder: folder || '',
+    createdAt: getTodayKST(),
     expiresAt: expiresAt || '',
     milestoneStep: parseInt(milestoneStep, 10) || 100,
     price: price ? parseInt(price, 10) : null,
@@ -3256,31 +3327,6 @@ app.get('/admin/api/check-duplicate', (req, res) => {
   const links = getVisibleLinks(req);
   const match = Object.keys(links).find((code) => links[code].url === url);
   res.json({ duplicate: !!match, code: match || null });
-});
-
-app.get('/admin/api/check-code', (req, res) => {
-  if (!isLoggedIn(req)) return res.status(401).json({ success: false });
-  const code = (req.query.code || '').trim();
-  if (!code) return res.json({ duplicate: false });
-  const allLinks = loadLinks();
-  const duplicate = !!allLinks[code];
-
-  // "영어+숫자" 형태면(예: hana3), 같은 영어 앞부분을 쓰는 코드들 중 가장 큰 숫자를 찾아서 알려줌
-  let prefix = null;
-  let lastNumber = null;
-  const m = code.match(/^([a-zA-Z]+)(\d+)$/);
-  if (m) {
-    prefix = m[1];
-    let maxNum = -1;
-    for (const c in allLinks) {
-      const cm = c.match(/^([a-zA-Z]+)(\d+)$/);
-      if (cm && cm[1].toLowerCase() === prefix.toLowerCase() && parseInt(cm[2], 10) > maxNum) {
-        maxNum = parseInt(cm[2], 10);
-      }
-    }
-    if (maxNum >= 0) lastNumber = maxNum;
-  }
-  res.json({ duplicate, prefix, lastNumber });
 });
 
 app.post('/admin/settings/coupang-api/validate', async (req, res) => {
