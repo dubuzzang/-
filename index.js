@@ -407,10 +407,23 @@ async function followLink(inputUrl) {
 }
 
 // 다른 사람 파트너스 추적값(lptag 등)을 떼어내고 상품 주소만 남김
+// 다른 파트너의 추적값·방문 기록용 값 (이벤트 페이지의 landingId 같은 "어떤 페이지인지" 값은 남김)
+const COUPANG_TRACKING_PARAMS = /^(lptag|lpid|subid|subparam|traceid|clickid2?|clickbeacon|addtag|ctag|src|spec|trackingcode|affiliateid|wpcid|wref|wtime|itime|mcid|redirect|pagetype|pagevalue|placementid|campaignid|campaigntype|contentcategory|contentkeyword|contenttype|imgsize|pageid|tsource|deviceid|sig|puid|puidtype|ctime|portal|landing_exp|offerid|sfid|token|impressionid|requestid|pt|slot)$/i;
+function stripCoupangTracking(url) {
+  const urlObj = new URL(url);
+  urlObj.protocol = 'https:';
+  urlObj.hash = '';
+  for (const [key, value] of [...urlObj.searchParams.entries()]) {
+    if (!value || COUPANG_TRACKING_PARAMS.test(key)) urlObj.searchParams.delete(key);
+  }
+  return urlObj.href;
+}
+
 function canonicalCoupangUrl(url) {
   const urlObj = new URL(url);
   const productId = (urlObj.pathname.match(/\/(?:vp|vm)\/products\/(\d+)/) || [])[1];
-  if (!productId) return urlObj.origin + urlObj.pathname;
+  // 상품이 아닌 쿠팡 페이지(이벤트·기획전 등)는 추적값만 떼고 나머지 주소는 그대로 둠
+  if (!productId) return stripCoupangTracking(url);
   const params = new URLSearchParams();
   ['itemId', 'vendorItemId'].forEach((name) => {
     const value = urlObj.searchParams.get(name);
@@ -758,25 +771,36 @@ if (!cloudflareStorage.isCloudflare) {
 }
 
 // 아무 쿠팡 링크나 넣으면 내 파트너스 링크로 변환
-async function convertToDeeplink(coupangUrl, accessKey, secretKey) {
-  const followed = await followLink(coupangUrl).catch(() => ({ url: coupangUrl }));
-  const resolvedUrl = canonicalCoupangUrl(followed.url);
+async function requestDeeplink(coupangUrl, accessKey, secretKey) {
   const path = '/v2/providers/affiliate_open_api/apis/openapi/v1/deeplink';
   const authorization = generateCoupangAuth('POST', path, accessKey, secretKey);
   const res = await fetch('https://api-gateway.coupang.com' + path, {
     method: 'POST',
     headers: { 'Authorization': authorization, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ coupangUrls: [resolvedUrl] })
+    body: JSON.stringify({ coupangUrls: [coupangUrl] })
   });
   const data = await res.json();
   if (data.rCode === '0' && data.data && data.data[0]) {
     return data.data[0].shortenUrl || data.data[0].landingUrl;
   }
-  // 같은 키로 다른 상품은 잘 바뀌는데 특정 상품만 이 메시지가 오면, 쿠팡이 파트너스에서 뺀 상품이라는 뜻
-  if (/url convert failed/i.test(data.rMessage || '')) {
-    throw new Error('쿠팡이 이 상품은 파트너스 링크로 바꿔주지 않아요 (파트너스 제외 상품이에요. PC/모바일 링크 문제는 아니에요)');
+  const error = new Error(data.rMessage || ('오류 코드: ' + data.rCode));
+  error.convertRejected = /url convert failed/i.test(data.rMessage || '');
+  throw error;
+}
+
+async function convertToDeeplink(coupangUrl, accessKey, secretKey) {
+  const followed = await followLink(coupangUrl).catch(() => ({ url: coupangUrl }));
+  // 정리한 주소 → 추적값만 뗀 전체 주소 → 처음 받은 링크 순서로 시도 (쿠팡이 주소 모양 때문에 거절할 때만 다음 걸로)
+  const candidates = [...new Set([canonicalCoupangUrl(followed.url), stripCoupangTracking(followed.url), coupangUrl])];
+  for (const candidate of candidates) {
+    try {
+      return await requestDeeplink(candidate, accessKey, secretKey);
+    } catch (e) {
+      if (!e.convertRejected) throw e;
+    }
   }
-  throw new Error(data.rMessage || ('오류 코드: ' + data.rCode));
+  // 모든 주소 모양을 다 거절하면, 쿠팡이 파트너스에서 뺀 상품·페이지라는 뜻
+  throw new Error('쿠팡이 이 상품·페이지는 파트너스 링크로 바꿔주지 않아요 (파트너스 제외 대상이에요. PC/모바일 링크 문제는 아니에요)');
 }
 
 // 상품 이름으로 검색
@@ -1641,7 +1665,8 @@ app.get('/admin/api/product-info', async (req, res) => {
       let query = '';
       try { query = new URL(inputUrl).searchParams.get('q') || ''; } catch (e) {}
       const [deeplink, found] = await Promise.allSettled([
-        convertToDeeplink(productUrl, keys.accessKey, keys.secretKey),
+        // 붙여넣은 링크 그대로 넘겨야, 정리한 주소를 쿠팡이 거절할 때 원래 링크로도 다시 시도할 수 있음
+        convertToDeeplink(card ? card.productUrl : inputUrl, keys.accessKey, keys.secretKey),
         card && card.title && card.image ? null : findCoupangPreview(productUrl, shared.title || query || (card && card.title), keys.accessKey, keys.secretKey)
       ]);
       const product = found.status === 'fulfilled' ? found.value : null;
