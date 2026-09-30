@@ -509,6 +509,38 @@ async function resolveCoupangAdsImage(url) {
   }
 }
 
+// 골드박스 상품은 하루에도 바뀌거나 품절로 빠져서, 아까 되던 링크가 나중엔 사진·제목을 못 찾게 됨.
+// 크론(30분마다)이 골드박스 상품의 사진·제목·가격을 R2에 7일 동안 모아둬서, 빠진 상품도 계속 찾게 함
+const GOLDBOX_ARCHIVE_KEY = 'previews/goldbox-archive.json';
+const GOLDBOX_ARCHIVE_DAYS = 7;
+async function loadGoldboxArchive() {
+  try {
+    const object = await cloudflareStorage.getObject(GOLDBOX_ARCHIVE_KEY);
+    return object ? JSON.parse(await object.text()) : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+async function archiveGoldboxProducts() {
+  if (!cloudflareStorage.isCloudflare || !COUPANG_ACCESS_KEY || !COUPANG_SECRET_KEY) return 0;
+  const products = await fetchGoldboxProducts(COUPANG_ACCESS_KEY, COUPANG_SECRET_KEY);
+  const archive = await loadGoldboxArchive();
+  const now = Date.now();
+  for (const p of products) {
+    if (!p.productId) continue;
+    archive[String(p.productId)] = {
+      productId: p.productId, productUrl: p.productUrl || '', productName: p.productName || '',
+      productImage: p.productImage || '', productPrice: p.productPrice || null, seenAt: now
+    };
+  }
+  for (const id in archive) {
+    if (!(now - archive[id].seenAt <= GOLDBOX_ARCHIVE_DAYS * 24 * 60 * 60 * 1000)) delete archive[id];
+  }
+  await cloudflareStorage.putObject(GOLDBOX_ARCHIVE_KEY, JSON.stringify(archive), 'application/json; charset=utf-8');
+  return products.length;
+}
+
 // 쿠팡 상품 페이지는 서버에서 못 읽어서(403), 오늘의 골드박스와 (상품명을 알면) 검색 결과에서
 // 상품번호가 정확히 같은 상품을 찾아 기본 미리보기 사진·제목을 채움
 async function findCoupangPreview(productUrl, keyword, accessKey, secretKey) {
@@ -528,11 +560,13 @@ async function findCoupangPreview(productUrl, keyword, accessKey, secretKey) {
   const keywords = [...new Set([limitSearchKeyword(name), limitSearchKeyword(name.split(',')[0])])].filter((k) => k.length >= 2);
   const search = (k) => cachedCoupangCatalog('search:' + k, 10 * 60 * 1000, () => searchCoupangProducts(k, accessKey, secretKey));
 
-  const [goldbox, searched] = await Promise.all([
+  const [goldbox, archived, searched] = await Promise.all([
     cachedCoupangCatalog('goldbox', 5 * 60 * 1000, () => fetchGoldboxProducts(accessKey, secretKey)),
+    cachedCoupangCatalog('goldbox-archive', 5 * 60 * 1000, async () => Object.values(await loadGoldboxArchive())),
     keywords[0] ? search(keywords[0]) : []
   ]);
-  let product = findIn(goldbox);
+  // 지금 골드박스 → 최근 7일 안에 골드박스에 있었던 상품 → 상품명 검색 순서
+  let product = findIn(goldbox) || findIn(archived);
   if (product) return toPreview(product, 'goldbox');
   product = findIn(searched);
   if (!product && keywords[1]) product = findIn(await search(keywords[1]));
@@ -878,9 +912,10 @@ app.post('/__cloudflare/maintenance', async (_req, res) => {
   if (!cloudflareStorage.isCloudflare) return res.sendStatus(404);
   try {
     const removedOldLinks = cleanupOldLinks();
+    const archivedGoldbox = await archiveGoldboxProducts().catch(() => 0);
     const prices = await collectDailyPrices();
     const removedExpiredLinks = cleanupExpiredUserLinks();
-    res.json({ success: true, prices, removedExpiredLinks, removedOldLinks });
+    res.json({ success: true, prices, removedExpiredLinks, removedOldLinks, archivedGoldbox });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
