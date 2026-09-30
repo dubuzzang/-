@@ -514,24 +514,29 @@ async function resolveCoupangAdsImage(url) {
 async function findCoupangPreview(productUrl, keyword, accessKey, secretKey) {
   const target = coupangProductKey(productUrl);
   if (!target) return null;
-  const searchKeyword = Array.from(String(keyword || '').replace(/\s+/g, ' ').trim()).slice(0, 100).join('');
+  const toPreview = async (product, source) => ({
+    title: String(product.productName || '').trim().slice(0, 200),
+    image: /^https:\/\//.test(product.productImage || '') ? await resolveCoupangAdsImage(product.productImage) : '',
+    // 골드박스·검색 API에는 할인율·원래 가격이 없음 (2026-09-30 실제 응답 필드로 확인) → 할인율은 공유 문구에서만 읽음
+    price: parsePriceNumber(product.productPrice),
+    source
+  });
+  const findIn = (products) => products.find((item) => isSameCoupangProduct(target, item.productUrl, item.productId));
+
+  // 상품명 전체(50자 안) → 못 찾으면 첫 쉼표 앞 핵심 상품명("세타필 로션 591ml, 단품, 1개" → "세타필 로션 591ml") 순서로 검색
+  const name = String(keyword || '').replace(/\s+/g, ' ').trim();
+  const keywords = [...new Set([limitSearchKeyword(name), limitSearchKeyword(name.split(',')[0])])].filter((k) => k.length >= 2);
+  const search = (k) => cachedCoupangCatalog('search:' + k, 10 * 60 * 1000, () => searchCoupangProducts(k, accessKey, secretKey));
+
   const [goldbox, searched] = await Promise.all([
     cachedCoupangCatalog('goldbox', 5 * 60 * 1000, () => fetchGoldboxProducts(accessKey, secretKey)),
-    searchKeyword ? cachedCoupangCatalog('search:' + searchKeyword, 10 * 60 * 1000, () => searchCoupangProducts(searchKeyword, accessKey, secretKey)) : []
+    keywords[0] ? search(keywords[0]) : []
   ]);
-  for (const [products, source] of [[goldbox, 'goldbox'], [searched, 'search']]) {
-    const product = products.find((item) => isSameCoupangProduct(target, item.productUrl, item.productId));
-    if (product) {
-      return {
-        title: String(product.productName || '').trim().slice(0, 200),
-        image: /^https:\/\//.test(product.productImage || '') ? await resolveCoupangAdsImage(product.productImage) : '',
-        // 골드박스·검색 API에는 할인율·원래 가격이 없음 (2026-09-30 실제 응답 필드로 확인) → 할인율은 공유 문구에서만 읽음
-        price: parsePriceNumber(product.productPrice),
-        source
-      };
-    }
-  }
-  return null;
+  let product = findIn(goldbox);
+  if (product) return toPreview(product, 'goldbox');
+  product = findIn(searched);
+  if (!product && keywords[1]) product = findIn(await search(keywords[1]));
+  return product ? toPreview(product, 'search') : null;
 }
 
 // 쿠팡 링크를 등록할 때, 서버가 직접 변환한 링크인지 확인하는 서명 (변환 API를 두 번 부르지 않으려고)
@@ -804,8 +809,18 @@ async function convertToDeeplink(coupangUrl, accessKey, secretKey) {
 }
 
 // 상품 이름으로 검색
+// 쿠팡 검색 API는 검색어가 50자를 넘으면 "keyword maximum length is 50" 오류를 냄 (2026-09-30 실제 응답으로 확인)
+// → 50자 안에서 띄어쓰기 기준으로 자름 (쿠팡 상품명은 대부분 50자가 넘음)
+function limitSearchKeyword(keyword) {
+  const chars = Array.from(String(keyword || '').replace(/\s+/g, ' ').trim());
+  if (chars.length <= 50) return chars.join('');
+  const cut = chars.slice(0, 50).join('');
+  const lastSpace = cut.lastIndexOf(' ');
+  return (lastSpace >= 20 ? cut.slice(0, lastSpace) : cut).replace(/[\s,+/-]+$/, '').trim();
+}
+
 async function searchCoupangProducts(keyword, accessKey, secretKey) {
-  const query = `keyword=${encodeURIComponent(keyword)}&limit=10`;
+  const query = `keyword=${encodeURIComponent(limitSearchKeyword(keyword))}&limit=10`;
   const path = '/v2/providers/affiliate_open_api/apis/openapi/products/search';
   const authorization = generateCoupangAuth('GET', `${path}?${query}`, accessKey, secretKey);
   const res = await fetch(`https://api-gateway.coupang.com${path}?${query}`, {
