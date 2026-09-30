@@ -487,19 +487,6 @@ function parseShareText(text, url) {
   return { title: title.slice(0, 120), price, discountRate };
 }
 
-// 쿠팡 상품 페이지는 서버에서 못 읽어서(403), 붙여넣은 문구에 상품명이 있으면 파트너스 검색 결과 중
-// 상품번호가 같은 걸 찾아서 정보를 채움 (상품번호로 검색하면 엉뚱한 상품만 나와서 상품명으로만 검색)
-// 검색 API는 1시간 호출 횟수 제한이 있어서 같은 상품은 메모리에 잠깐 기억해둠
-const coupangProductCache = new Map();
-async function findCoupangProduct(productUrl, titleHint, accessKey, secretKey) {
-  const productId = (productUrl.match(/\/products\/(\d+)/) || [])[1];
-  if (!productId || !titleHint) return null;
-  if (coupangProductCache.has(productId)) return coupangProductCache.get(productId);
-  const products = await searchCoupangProducts(titleHint.slice(0, 50), accessKey, secretKey);
-  const match = products.find((p) => String(p.productId) === productId) || null;
-  if (match) coupangProductCache.set(productId, match);
-  return match;
-}
 
 // 쿠팡 상품 페이지 HTML에서 현재 가격을 추출 (실험적 기능)
 // 공식 API가 아니라 페이지 내용을 직접 읽어서 숫자를 찾는 방식이라,
@@ -796,6 +783,12 @@ function imgProxyUrl(host, url) {
   return url;
 }
 
+// 카톡·페북·스레드 등이 링크 미리보기를 만들 때 쓰는 봇 (사람이 쓰는 앱 안 브라우저는 제외)
+const LINK_PREVIEW_BOT_UA = /kakaotalk-scrap|facebookexternalhit|facebot|twitterbot|slackbot|discordbot|telegrambot|whatsapp|linkedinbot|skypeuripreview|yeti\/|daumoa|googlebot|bingbot|applebot|pinterestbot|redditbot|embedly|iframely|crawler|spider/i;
+function isLinkPreviewBot(req) {
+  return LINK_PREVIEW_BOT_UA.test(req.headers['user-agent'] || '');
+}
+
 app.get('/r/:code', (req, res) => {
   const code = req.params.code;
   const links = loadLinks();
@@ -806,6 +799,10 @@ app.get('/r/:code', (req, res) => {
   if (isExpired(link)) {
     return res.status(410).send('이 링크는 기간이 종료되어 더 이상 사용할 수 없어요.');
   }
+
+  // 제목·사진을 직접 안 넣은 링크는 미리보기 봇을 원래 상품 링크로 바로 보내서,
+  // 쿠팡 등 원래 페이지가 주는 기본 사진·제목이 카톡 미리보기에 그대로 나오게 함 (봇은 클릭 수에 안 셈)
+  if (!link.title && !link.image && isLinkPreviewBot(req)) return res.redirect(302, link.url);
 
   const host = req.protocol + '://' + req.get('host');
   const title = escapeHtml(link.title || code);
@@ -906,7 +903,7 @@ const FEATURE_GUIDE = [
     items: [
       '새 링크 등록: 상품 링크(또는 공유 문구 통째로)를 붙여넣으면 제목·이미지·가격·할인율이 자동으로 채워지고, 짧은 주소는 랜덤으로 만들어져요',
       '쿠팡 링크는 다른 사람 파트너스 링크여도 등록된 쿠팡 API 키로 무조건 내 파트너스 링크로 바뀌어요 (쿠팡이 파트너스에서 뺀 상품은 변환이 안 돼요)',
-      '쿠팡은 서버에서 상품 정보를 읽지 못하게 막아둬서 링크 변환만 되고, 사진·제목은 직접 넣거나 🔍 검색으로 채워요',
+      '제목·사진을 비워두면 카톡 등 미리보기에 쿠팡 등 상품 페이지의 기본 사진·제목이 그대로 나오고, 바꾸고 싶을 때만 직접 넣으면 돼요 (하나라도 넣으면 넣은 내용으로 보여요)',
       '"🔍 상품 이름으로 검색해서 채우기": 상품명 검색 → 사진/가격 보고 클릭하면 자동 입력',
       '링크 목록은 한 줄씩: "복사하기"는 🚆제목+가격+짧은 링크 공유 문구를, /r/코드를 누르면 짧은 링크만 복사해요',
       '📌 고정하지 않은 링크는 만든 지 3일이 지나면 자동으로 정리돼요'
@@ -1407,11 +1404,11 @@ app.get('/admin/edit/:code', (req, res) => {
           <label style="font-size:12px; color:#E0399B;">쿠팡 링크</label>
           <input type="text" name="url" value="${escapeHtml(link.url)}" required>
           <label style="font-size:12px; color:#E0399B;">제목</label>
-          <input type="text" name="title" value="${escapeHtml(link.title || '')}">
+          <input type="text" name="title" value="${escapeHtml(link.title || '')}" placeholder="비워두면 상품 페이지 기본 제목 그대로">
           <label style="font-size:12px; color:#E0399B;">설명</label>
           <input type="text" name="description" value="${escapeHtml(link.description || '')}">
           <label style="font-size:12px; color:#E0399B;">이미지 주소</label>
-          <input type="text" name="image" id="editImageInput" value="${escapeHtml(link.image || '')}" oninput="updateEditPreview()">
+          <input type="text" name="image" id="editImageInput" value="${escapeHtml(link.image || '')}" placeholder="비워두면 상품 페이지 기본 사진 그대로" oninput="updateEditPreview()">
           <img id="editImagePreview" src="${escapeHtml(link.image ? imgProxyUrl(host, link.image) : '')}" style="width:100%; max-height:180px; object-fit:cover; border-radius:16px; margin-bottom:16px; display:${link.image ? 'block' : 'none'}; background:#FFF5FA; border:1px solid rgba(255,111,181,0.24);" onerror="this.style.display='none';" onload="this.style.display='block';">
           <label style="font-size:12px; color:#E0399B;">만료일 (선택)</label>
           <input type="date" name="expiresAt" value="${escapeHtml(link.expiresAt || '')}">
@@ -1524,22 +1521,10 @@ app.get('/admin/api/product-info', async (req, res) => {
     if (isCoupangUrl(page.url) || isCoupangUrl(inputUrl)) {
       const keys = getEffectiveCoupangKeys(req);
       if (!keys) return res.json({ success: false, error: missingCoupangKeysMessage(req) });
-      const productUrl = canonicalCoupangUrl(page.url);
-      const [deeplink, product] = await Promise.allSettled([
-        convertToDeeplink(productUrl, keys.accessKey, keys.secretKey),
-        findCoupangProduct(productUrl, info.title, keys.accessKey, keys.secretKey)
-      ]);
-      if (product.status === 'fulfilled' && product.value) {
-        info.title = product.value.productName || info.title;
-        info.image = product.value.productImage || '';
-        info.price = parsePriceNumber(product.value.productPrice) || info.price;
-      }
-      // 변환이 안 돼도 찾아낸 제목/사진은 같이 보내서 미리보기에는 보이게 함 (등록은 서버에서 막힘)
-      if (deeplink.status === 'rejected') {
-        return res.json({ ...info, success: false, error: '쿠팡 링크 변환 실패: ' + deeplink.reason.message });
-      }
-      info.url = deeplink.value;
-      info.urlSig = signConvertedUrl(getCurrentUser(req), deeplink.value);
+      // 쿠팡은 제목·사진을 비워둬서 카톡 등 미리보기에 쿠팡 기본 사진·제목이 나오게 함 (가격·할인율만 공유 문구용으로 씀)
+      info.title = '';
+      info.url = await convertToDeeplink(canonicalCoupangUrl(page.url), keys.accessKey, keys.secretKey);
+      info.urlSig = signConvertedUrl(getCurrentUser(req), info.url);
       info.converted = true;
     } else if (page.html) {
       const meta = parseProductMeta(page.html, page.url);
@@ -1806,6 +1791,10 @@ app.get('/admin', (req, res) => {
     const todayClicks = stats.perLink[code].todayClicks;
     const totalAllTime = stats.perLink[code].totalAllTime;
     const title = link.title || code;
+    // 제목을 안 넣은 링크는 미리보기에 상품 페이지 기본 제목이 나가니까, 목록에도 그렇게 표시
+    const rowTitleHtml = link.title
+      ? escapeHtml(link.title)
+      : `<span style="color:#8A6A93; font-weight:500;">${isCoupangUrl(link.url) ? '쿠팡' : '상품 페이지'} 기본 미리보기</span>`;
     const rowId = `row_${idx}`;
     const proxiedImg = link.image ? imgProxyUrl(host, link.image) : '';
     const imgSrc = proxiedImg ? `${escapeHtml(proxiedImg)}${proxiedImg.includes('?') ? '&' : '?'}v=${idx}` : '';
@@ -1816,16 +1805,16 @@ app.get('/admin', (req, res) => {
     rowData.totalClicks[code] = totalAllTime;
     rowData.linkTitles[code] = title;
     rowData.milestoneStep[code] = link.milestoneStep || 100;
-    rowData.shareInfo[code] = { title, price: link.price || 0, discountRate: link.discountRate || 0, shortUrl, platform: stats.perLink[code].platform };
+    rowData.shareInfo[code] = { title: link.title || '', price: link.price || 0, discountRate: link.discountRate || 0, shortUrl, platform: stats.perLink[code].platform };
     if (Object.keys(link.priceHistory || {}).length) rowData.priceHistoryAll[code] = { history: link.priceHistory, title };
 
     rows += `
       <div class="link-row glass" data-code="${escapeHtml(code)}" data-row-id="${rowId}">
         <button type="button" class="row-pin" onclick="document.getElementById('pinform_${rowId}').submit();" title="${link.pinned ? '고정 해제' : '고정하면 3일이 지나도 자동 삭제되지 않아요'}">${link.pinned ? '📌' : '📍'}</button>
         <form id="pinform_${rowId}" method="POST" action="/admin/toggle-pin" style="display:none;"><input type="hidden" name="code" value="${escapeHtml(code)}"></form>
-        ${imgSrc ? `<img src="${imgSrc}" class="row-thumb" alt="" onerror="this.style.visibility='hidden';">` : '<div class="row-thumb"></div>'}
+        ${imgSrc ? `<img src="${imgSrc}" class="row-thumb" alt="" onerror="this.style.visibility='hidden';">` : '<div class="row-thumb" style="display:flex; align-items:center; justify-content:center; font-size:18px;">🛒</div>'}
         <div class="row-main">
-          <div class="row-title" title="${escapeHtml(title)}">${escapeHtml(title)}</div>
+          <div class="row-title" title="${escapeHtml(link.title || '')}">${rowTitleHtml}</div>
           <div class="row-sub">${priceHtml}<span class="row-link" onclick="copyText('${shortUrl}', this)" title="클릭하면 짧은 링크만 복사돼요">/r/${escapeHtml(code)}</span>${isExpired(link) ? ' · <span style="color:#ff3860;">만료됨</span>' : ''}</div>
         </div>
         <div class="row-clicks mono" id="clicks_${rowId}" title="오늘 클릭 / 누적 클릭">${todayClicks}<span>누적 ${totalAllTime}</span></div>
@@ -2152,8 +2141,8 @@ app.get('/admin', (req, res) => {
               <span id="createImageEmpty">🖼️<br>사진 미리보기</span>
             </div>
             <div style="flex:1; min-width:0;">
-              <input type="text" name="title" id="titleInput" placeholder="제목 (자동으로 채워져요)">
-              <input type="text" name="image" id="createImageInput" placeholder="이미지 주소 (자동으로 채워져요)" oninput="updateCreatePreview()">
+              <input type="text" name="title" id="titleInput" placeholder="제목 (비워두면 상품 페이지 기본 제목 그대로)">
+              <input type="text" name="image" id="createImageInput" placeholder="이미지 주소 (비워두면 상품 페이지 기본 사진 그대로)" oninput="updateCreatePreview()">
               <div id="createPriceLine" class="yellow-emph" style="font-size:13px; font-weight:800; color:#E0A200; margin:-4px 0 12px; display:none;"></div>
             </div>
           </div>
@@ -2461,17 +2450,16 @@ app.get('/admin', (req, res) => {
           const res = await fetch('/admin/api/product-info?text=' + encodeURIComponent(text));
           const data = await res.json();
           if (requestId !== productInfoRequestId) return false;
-          fillProductFields(data, '사진 주소를<br>넣어주세요');
+          fillProductFields(data, '🛒<br>기본 사진<br>그대로');
           if (!data.success) { setProductStatus('⚠ ' + data.error, '#ff3860'); return false; }
           input.value = data.url;
           lastLoadedUrl = data.url;
           document.getElementById('urlSigInput').value = data.urlSig || '';
           checkDuplicateUrl();
-          // 쿠팡은 상품 페이지·API를 서버와 다른 사이트에서 못 읽게 막아둬서 링크 변환만 하고, 사진·제목은 직접 채움
-          const missing = [!data.title && '제목', !data.image && '사진'].filter(Boolean);
+          // 제목·사진이 비어 있으면 카톡 등 미리보기에 상품 페이지(쿠팡 등)의 기본 사진·제목이 그대로 나옴
           let message = data.converted ? '✅ 내 파트너스 링크로 변환했어요' : '✅ 링크를 불러왔어요';
-          if (missing.length) message += ' · ' + missing.join('/') + '은(는) 직접 입력하거나 🔍 검색으로 채워주세요';
-          setProductStatus(message, missing.length ? '#E0A200' : '#3FBFA6');
+          if (!data.title && !data.image) message += ' · 카톡 미리보기엔 상품 페이지 기본 사진·제목이 그대로 나와요 (바꾸고 싶을 때만 입력)';
+          setProductStatus(message, '#3FBFA6');
           return true;
         } catch (e) {
           if (requestId === productInfoRequestId) setProductStatus('⚠ 상품 정보를 불러오는 중 오류가 발생했어요', '#ff3860');
@@ -2979,13 +2967,14 @@ app.get('/admin', (req, res) => {
         if (info.platform && disclosures[info.platform]) {
           text += disclosures[info.platform] + '\\n';
         }
-        text += '🚆 ' + info.title + '\\n';
+        // 제목을 안 넣은 링크는 카톡 미리보기에 상품 제목이 나오니까 제목 줄 없이 링크 앞에 🚆
+        if (info.title) text += '🚆 ' + info.title + '\\n';
         if (info.price) {
           text += '💰 ' + info.price.toLocaleString() + '원';
           if (info.discountRate) text += ' (' + info.discountRate + '% 할인)';
           text += '\\n';
         }
-        text += '🔗 ' + info.shortUrl;
+        text += (info.title ? '🔗 ' : '🚆 ') + info.shortUrl;
         copyText(text, el);
       }
 
