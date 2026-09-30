@@ -482,6 +482,21 @@ async function fetchGoldboxProducts(accessKey, secretKey) {
   throw new Error(data.rMessage || ('오류 코드: ' + data.rCode));
 }
 
+// 검색 API가 주는 사진 주소(ads-partners.coupang.com/image1/...)는 브라우저에서 열면 504라 안 보임.
+// 서버에서 사진으로 요청하면 실제 쿠팡 CDN 사진 주소로 302 이동하니, 그 주소로 바꿔서 씀
+async function resolveCoupangAdsImage(url) {
+  try {
+    if (new URL(url).hostname !== 'ads-partners.coupang.com') return url;
+    const res = await fetch(url, { headers: { 'Accept': 'image/*' }, redirect: 'manual', signal: AbortSignal.timeout(6000) });
+    if (res.body) res.body.cancel().catch(() => {});
+    const location = res.headers.get('location');
+    const target = location ? new URL(location, url) : null;
+    return target && target.protocol === 'https:' && target.hostname.endsWith('.coupangcdn.com') ? target.href : '';
+  } catch (e) {
+    return '';
+  }
+}
+
 // 쿠팡 상품 페이지는 서버에서 못 읽어서(403), 오늘의 골드박스와 (상품명을 알면) 검색 결과에서
 // 상품번호가 정확히 같은 상품을 찾아 기본 미리보기 사진·제목을 채움
 async function findCoupangPreview(productUrl, keyword, accessKey, secretKey) {
@@ -497,7 +512,7 @@ async function findCoupangPreview(productUrl, keyword, accessKey, secretKey) {
     if (product) {
       return {
         title: String(product.productName || '').trim().slice(0, 200),
-        image: /^https:\/\//.test(product.productImage || '') ? product.productImage : '',
+        image: /^https:\/\//.test(product.productImage || '') ? await resolveCoupangAdsImage(product.productImage) : '',
         price: parsePriceNumber(product.productPrice),
         discountRate: Number(product.discountRate) > 0 && Number(product.discountRate) < 100 ? Math.round(Number(product.discountRate)) : null,
         source
@@ -1664,6 +1679,8 @@ app.get('/admin/api/search', async (req, res) => {
   if (!keys) return res.json({ success: false, error: missingCoupangKeysMessage(req), products: [] });
   try {
     const products = await searchCoupangProducts(req.query.keyword || '', keys.accessKey, keys.secretKey);
+    // 검색 결과 사진도 브라우저에서 보이는 쿠팡 CDN 주소로 바꿔서 보냄
+    await Promise.all(products.map(async (p) => { p.productImage = await resolveCoupangAdsImage(p.productImage); }));
     res.json({ success: true, products });
   } catch (e) {
     res.json({ success: false, error: e.message, products: [] });
