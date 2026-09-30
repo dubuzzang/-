@@ -420,6 +420,93 @@ function canonicalCoupangUrl(url) {
   return `https://www.coupang.com/vp/products/${productId}${query ? '?' + query : ''}`;
 }
 
+// 쿠팡 공식 상품 카드(배너) 주소: 다른 파트너가 만든 카드 링크는 리다이렉트 주소 자체에 상품 주소·상품명·사진이 들어있음
+function parseCoupangCard(url) {
+  let card;
+  try { card = new URL(url); } catch (e) { return null; }
+  const banner = card.hostname === 'ads-partners.coupang.com' && card.pathname === '/iframe/product';
+  const asset = card.hostname === 'partners.coupangcdn.com' && /^\/widget\/product-banner\/[^/]+\/index-[a-f0-9]+\.html$/.test(card.pathname);
+  if (card.protocol !== 'https:' || (!banner && !asset)) return null;
+  const productUrl = card.searchParams.get('linkUrl') || '';
+  if (!isCoupangUrl(productUrl) || !coupangProductKey(productUrl)) return null;
+  let image = '';
+  try {
+    const raw = card.searchParams.get(banner ? 'image' : 'productImage') || '';
+    // 배너의 사진은 "retail/images/..." 같은 쿠팡 CDN 상대 경로로 들어있음
+    const imageUrl = raw && (banner ? new URL(raw.replace(/^\/?image\//, ''), 'https://static.coupangcdn.com/image/') : new URL(raw));
+    if (imageUrl && imageUrl.protocol === 'https:' && imageUrl.hostname.endsWith('.coupangcdn.com')) image = imageUrl.href;
+  } catch (e) {}
+  const title = (card.searchParams.get(banner ? 'title' : 'productDescription') || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+  return { productUrl, title, image };
+}
+
+// 쿠팡 주소에서 상품번호·옵션번호만 뽑음 (파트너스 주소 link.coupang.com/re/AFFSDP?pageKey=... 도 지원)
+function coupangProductKey(url) {
+  try {
+    const urlObj = new URL(url);
+    const productId = (urlObj.pathname.match(/\/(?:vp|vm)\/products\/(\d+)/) || [])[1] ||
+      (urlObj.pathname === '/re/AFFSDP' ? urlObj.searchParams.get('pageKey') : '');
+    if (!/^\d+$/.test(productId || '')) return null;
+    return { productId, itemId: urlObj.searchParams.get('itemId') || '', vendorItemId: urlObj.searchParams.get('vendorItemId') || '' };
+  } catch (e) {
+    return null;
+  }
+}
+
+// 상품번호가 같고, 옵션번호는 양쪽에 다 있을 때만 비교 (비슷한 다른 상품·옵션 사진으로 바꿔치기 않게)
+function isSameCoupangProduct(target, candidateUrl, candidateId) {
+  const candidate = coupangProductKey(candidateUrl) || { productId: String(candidateId || ''), itemId: '', vendorItemId: '' };
+  if (candidate.productId !== target.productId) return false;
+  return ['itemId', 'vendorItemId'].every((key) => !target[key] || !candidate[key] || target[key] === candidate[key]);
+}
+
+// 골드박스·검색 결과는 파트너스 API 호출 제한이 있어서 잠깐 기억해둠 (골드박스 5분, 검색은 검색어별 10분)
+const coupangCatalogCache = new Map();
+async function cachedCoupangCatalog(key, ttlMs, load) {
+  const hit = coupangCatalogCache.get(key);
+  if (hit && hit.expiresAt > Date.now()) return hit.products;
+  let products = [];
+  try { products = await load(); } catch (e) {} // 실패도 잠깐 기억해서 같은 요청을 반복하지 않음
+  coupangCatalogCache.set(key, { expiresAt: Date.now() + ttlMs, products });
+  return products;
+}
+
+async function fetchGoldboxProducts(accessKey, secretKey) {
+  const path = '/v2/providers/affiliate_open_api/apis/openapi/products/goldbox';
+  const res = await fetch('https://api-gateway.coupang.com' + path, {
+    headers: { 'Authorization': generateCoupangAuth('GET', path, accessKey, secretKey), 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(8000)
+  });
+  const data = await res.json();
+  if (data.rCode === '0' && Array.isArray(data.data)) return data.data;
+  throw new Error(data.rMessage || ('오류 코드: ' + data.rCode));
+}
+
+// 쿠팡 상품 페이지는 서버에서 못 읽어서(403), 오늘의 골드박스와 (상품명을 알면) 검색 결과에서
+// 상품번호가 정확히 같은 상품을 찾아 기본 미리보기 사진·제목을 채움
+async function findCoupangPreview(productUrl, keyword, accessKey, secretKey) {
+  const target = coupangProductKey(productUrl);
+  if (!target) return null;
+  const searchKeyword = Array.from(String(keyword || '').replace(/\s+/g, ' ').trim()).slice(0, 100).join('');
+  const [goldbox, searched] = await Promise.all([
+    cachedCoupangCatalog('goldbox', 5 * 60 * 1000, () => fetchGoldboxProducts(accessKey, secretKey)),
+    searchKeyword ? cachedCoupangCatalog('search:' + searchKeyword, 10 * 60 * 1000, () => searchCoupangProducts(searchKeyword, accessKey, secretKey)) : []
+  ]);
+  for (const [products, source] of [[goldbox, 'goldbox'], [searched, 'search']]) {
+    const product = products.find((item) => isSameCoupangProduct(target, item.productUrl, item.productId));
+    if (product) {
+      return {
+        title: String(product.productName || '').trim().slice(0, 200),
+        image: /^https:\/\//.test(product.productImage || '') ? product.productImage : '',
+        price: parsePriceNumber(product.productPrice),
+        discountRate: Number(product.discountRate) > 0 && Number(product.discountRate) < 100 ? Math.round(Number(product.discountRate)) : null,
+        source
+      };
+    }
+  }
+  return null;
+}
+
 // 쿠팡 링크를 등록할 때, 서버가 직접 변환한 링크인지 확인하는 서명 (변환 API를 두 번 부르지 않으려고)
 function signConvertedUrl(username, url) {
   return crypto.createHmac('sha256', ADMIN_PASSWORD).update('deeplink:' + username + ':' + url).digest('hex');
@@ -805,9 +892,11 @@ app.get('/r/:code', (req, res) => {
   if (!link.title && !link.image && isLinkPreviewBot(req)) return res.redirect(302, link.url);
 
   const host = req.protocol + '://' + req.get('host');
-  const title = escapeHtml(link.title || code);
+  // 제목·사진 중 하나만 직접 넣었으면, 나머지는 자동으로 찾아둔 상품 기본 정보로 채움
+  const cardImage = link.image || link.previewImage || '';
+  const title = escapeHtml(link.title || link.previewTitle || code);
   const desc = escapeHtml(link.description || '');
-  const image = escapeHtml(link.image ? imgProxyUrl(host, link.image) : '');
+  const image = escapeHtml(cardImage ? imgProxyUrl(host, cardImage) : '');
   const src = detectSource(req);
   const goUrl = `/r/${encodeURIComponent(code)}/go?src=${encodeURIComponent(src)}`;
 
@@ -903,7 +992,8 @@ const FEATURE_GUIDE = [
     items: [
       '새 링크 등록: 상품 링크(또는 공유 문구 통째로)를 붙여넣으면 제목·이미지·가격·할인율이 자동으로 채워지고, 짧은 주소는 랜덤으로 만들어져요',
       '쿠팡 링크는 다른 사람 파트너스 링크여도 등록된 쿠팡 API 키로 무조건 내 파트너스 링크로 바뀌어요 (쿠팡이 파트너스에서 뺀 상품은 변환이 안 돼요)',
-      '제목·사진을 비워두면 카톡 등 미리보기에 쿠팡 등 상품 페이지의 기본 사진·제목이 그대로 나오고, 바꾸고 싶을 때만 직접 넣으면 돼요 (하나라도 넣으면 넣은 내용으로 보여요)',
+      '쿠팡 상품 사진·제목은 상품 카드 링크·골드박스·상품 검색(공유 문구에 상품명이 있을 때)에서 자동으로 가져와 목록에 보여줘요',
+      '제목·사진칸을 비워두면 카톡 등 미리보기에 쿠팡 등 상품 페이지의 기본 사진·제목이 그대로 나오고, 바꾸고 싶을 때만 직접 넣으면 돼요',
       '"🔍 상품 이름으로 검색해서 채우기": 상품명 검색 → 사진/가격 보고 클릭하면 자동 입력',
       '링크 목록은 한 줄씩: "복사하기"는 🚆제목+가격+짧은 링크 공유 문구를, /r/코드를 누르면 짧은 링크만 복사해요',
       '📌 고정하지 않은 링크는 만든 지 3일이 지나면 자동으로 정리돼요'
@@ -1488,10 +1578,15 @@ app.post('/admin/edit', async (req, res) => {
   }
 
   const newUrl = extractFirstUrl(url) || String(url || '').trim();
-  try {
-    links[code].url = newUrl === links[code].url ? newUrl : await ensureMyCoupangLink(req, newUrl);
-  } catch (e) {
-    return sendFormError(res, '쿠팡 링크 변환 실패: ' + e.message);
+  if (newUrl !== links[code].url) {
+    try {
+      links[code].url = await ensureMyCoupangLink(req, newUrl);
+    } catch (e) {
+      return sendFormError(res, '쿠팡 링크 변환 실패: ' + e.message);
+    }
+    // 다른 상품으로 바뀌었으니 예전 상품의 기본 미리보기는 지움
+    links[code].previewTitle = '';
+    links[code].previewImage = '';
   }
   links[code].title = title || '';
   links[code].description = description || '';
@@ -1515,21 +1610,45 @@ app.get('/admin/api/product-info', async (req, res) => {
   const inputUrl = extractFirstUrl(text);
   if (!inputUrl) return res.json({ success: false, error: '붙여넣은 내용에서 링크를 찾지 못했어요' });
 
-  const info = { url: inputUrl, urlSig: '', converted: false, image: '', ...parseShareText(text, inputUrl) };
+  // 자동으로 찾은 사진·제목은 "기본 미리보기(previewTitle/previewImage)"로만 쓰고, 직접 입력하는 제목·사진칸은 비워둠
+  // → 카톡 등 미리보기 봇은 원래 상품 페이지(쿠팡 등)의 기본 카드를 그대로 봄
+  const shared = parseShareText(text, inputUrl);
+  const info = { url: inputUrl, urlSig: '', converted: false, previewTitle: '', previewImage: '', previewSource: '', price: shared.price, discountRate: shared.discountRate };
   try {
     const page = await followLink(inputUrl).catch(() => ({ url: inputUrl, html: '' }));
-    if (isCoupangUrl(page.url) || isCoupangUrl(inputUrl)) {
+    const card = parseCoupangCard(page.url) || parseCoupangCard(inputUrl);
+    if (card || isCoupangUrl(page.url) || isCoupangUrl(inputUrl)) {
       const keys = getEffectiveCoupangKeys(req);
       if (!keys) return res.json({ success: false, error: missingCoupangKeysMessage(req) });
-      // 쿠팡은 제목·사진을 비워둬서 카톡 등 미리보기에 쿠팡 기본 사진·제목이 나오게 함 (가격·할인율만 공유 문구용으로 씀)
-      info.title = '';
-      info.url = await convertToDeeplink(canonicalCoupangUrl(page.url), keys.accessKey, keys.secretKey);
+      // 카드 주소는 그 안의 상품 주소를 변환해야 해서, 상품 주소까지 따라감
+      const productPage = card ? await followLink(card.productUrl).catch(() => ({ url: card.productUrl })) : page;
+      const productUrl = canonicalCoupangUrl(productPage.url);
+      let query = '';
+      try { query = new URL(inputUrl).searchParams.get('q') || ''; } catch (e) {}
+      const [deeplink, found] = await Promise.allSettled([
+        convertToDeeplink(productUrl, keys.accessKey, keys.secretKey),
+        card && card.title && card.image ? null : findCoupangPreview(productUrl, shared.title || query || (card && card.title), keys.accessKey, keys.secretKey)
+      ]);
+      const product = found.status === 'fulfilled' ? found.value : null;
+      info.previewTitle = (card && card.title) || (product && product.title) || '';
+      info.previewImage = (card && card.image) || (product && product.image) || '';
+      info.previewSource = card && (card.title || card.image) ? 'card' : (product ? product.source : '');
+      if (product) {
+        info.price = info.price || product.price;
+        info.discountRate = info.discountRate || product.discountRate;
+      }
+      // 변환이 안 돼도 찾은 사진·제목은 같이 보내서 미리보기에는 보이게 함 (등록은 서버에서 막힘)
+      if (deeplink.status === 'rejected') {
+        return res.json({ ...info, success: false, error: '쿠팡 링크 변환 실패: ' + deeplink.reason.message });
+      }
+      info.url = deeplink.value;
       info.urlSig = signConvertedUrl(getCurrentUser(req), info.url);
       info.converted = true;
     } else if (page.html) {
       const meta = parseProductMeta(page.html, page.url);
-      info.title = meta.title || info.title || meta.pageTitle;
-      info.image = meta.image;
+      info.previewTitle = meta.title || shared.title || meta.pageTitle;
+      info.previewImage = meta.image;
+      info.previewSource = 'page';
       info.price = meta.price || info.price;
       info.discountRate = meta.discountRate || info.discountRate;
     }
@@ -1790,13 +1909,15 @@ app.get('/admin', (req, res) => {
     const shortUrl = `${host}/r/${code}`;
     const todayClicks = stats.perLink[code].todayClicks;
     const totalAllTime = stats.perLink[code].totalAllTime;
-    const title = link.title || code;
-    // 제목을 안 넣은 링크는 미리보기에 상품 페이지 기본 제목이 나가니까, 목록에도 그렇게 표시
-    const rowTitleHtml = link.title
-      ? escapeHtml(link.title)
+    // 직접 넣은 제목·사진이 우선이고, 없으면 자동으로 찾아둔 상품 기본 제목·사진을 보여줌
+    const shownTitle = link.title || link.previewTitle || '';
+    const shownImage = link.image || link.previewImage || '';
+    const title = shownTitle || code;
+    const rowTitleHtml = shownTitle
+      ? escapeHtml(shownTitle)
       : `<span style="color:#8A6A93; font-weight:500;">${isCoupangUrl(link.url) ? '쿠팡' : '상품 페이지'} 기본 미리보기</span>`;
     const rowId = `row_${idx}`;
-    const proxiedImg = link.image ? imgProxyUrl(host, link.image) : '';
+    const proxiedImg = shownImage ? imgProxyUrl(host, shownImage) : '';
     const imgSrc = proxiedImg ? `${escapeHtml(proxiedImg)}${proxiedImg.includes('?') ? '&' : '?'}v=${idx}` : '';
     const priceHtml = link.price
       ? `<span class="yellow-emph" style="color:#E0A200; font-weight:800;">${link.price.toLocaleString()}원</span>${link.discountRate ? ` <span style="color:#ff3860;">${link.discountRate}%↓</span>` : ''} · `
@@ -1805,7 +1926,7 @@ app.get('/admin', (req, res) => {
     rowData.totalClicks[code] = totalAllTime;
     rowData.linkTitles[code] = title;
     rowData.milestoneStep[code] = link.milestoneStep || 100;
-    rowData.shareInfo[code] = { title: link.title || '', price: link.price || 0, discountRate: link.discountRate || 0, shortUrl, platform: stats.perLink[code].platform };
+    rowData.shareInfo[code] = { title: shownTitle, price: link.price || 0, discountRate: link.discountRate || 0, shortUrl, platform: stats.perLink[code].platform };
     if (Object.keys(link.priceHistory || {}).length) rowData.priceHistoryAll[code] = { history: link.priceHistory, title };
 
     rows += `
@@ -1814,7 +1935,7 @@ app.get('/admin', (req, res) => {
         <form id="pinform_${rowId}" method="POST" action="/admin/toggle-pin" style="display:none;"><input type="hidden" name="code" value="${escapeHtml(code)}"></form>
         ${imgSrc ? `<img src="${imgSrc}" class="row-thumb" alt="" onerror="this.style.visibility='hidden';">` : '<div class="row-thumb" style="display:flex; align-items:center; justify-content:center; font-size:18px;">🛒</div>'}
         <div class="row-main">
-          <div class="row-title" title="${escapeHtml(link.title || '')}">${rowTitleHtml}</div>
+          <div class="row-title" title="${escapeHtml(shownTitle)}">${rowTitleHtml}</div>
           <div class="row-sub">${priceHtml}<span class="row-link" onclick="copyText('${shortUrl}', this)" title="클릭하면 짧은 링크만 복사돼요">/r/${escapeHtml(code)}</span>${isExpired(link) ? ' · <span style="color:#ff3860;">만료됨</span>' : ''}</div>
         </div>
         <div class="row-clicks mono" id="clicks_${rowId}" title="오늘 클릭 / 누적 클릭">${todayClicks}<span>누적 ${totalAllTime}</span></div>
@@ -2149,6 +2270,8 @@ app.get('/admin', (req, res) => {
           <input type="hidden" name="price" id="priceInput">
           <input type="hidden" name="discountRate" id="discountRateInput">
           <input type="hidden" name="urlSig" id="urlSigInput">
+          <input type="hidden" name="previewTitle" id="previewTitleInput">
+          <input type="hidden" name="previewImage" id="previewImageInput">
           <button type="submit" id="createSubmitBtn" class="btn-primary" style="width:100%;">등록하기</button>
           <button type="button" onclick="openSearchModal()" class="btn-ghost" style="width:100%; margin-top:10px;">🔍 상품 이름으로 검색해서 채우기</button>
         </form>
@@ -2424,9 +2547,14 @@ app.get('/admin', (req, res) => {
         if (value && value !== lastLoadedUrl) loadProductInfo(value);
       }
 
+      // 새 상품을 불러오면 직접 입력칸은 비우고, 자동으로 찾은 사진·제목은 "기본 미리보기"로만 보여줌
       function fillProductFields(info, emptyImageText) {
-        document.getElementById('titleInput').value = info.title || '';
-        document.getElementById('createImageInput').value = info.image || '';
+        const titleInput = document.getElementById('titleInput');
+        titleInput.value = '';
+        titleInput.placeholder = info.previewTitle ? '제목: ' + info.previewTitle + ' (바꾸고 싶을 때만 입력)' : '제목 (비워두면 상품 페이지 기본 제목 그대로)';
+        document.getElementById('createImageInput').value = '';
+        document.getElementById('previewTitleInput').value = info.previewTitle || '';
+        document.getElementById('previewImageInput').value = info.previewImage || '';
         document.getElementById('priceInput').value = info.price || '';
         document.getElementById('discountRateInput').value = info.discountRate || '';
         updateCreatePreview(emptyImageText);
@@ -2456,10 +2584,13 @@ app.get('/admin', (req, res) => {
           lastLoadedUrl = data.url;
           document.getElementById('urlSigInput').value = data.urlSig || '';
           checkDuplicateUrl();
-          // 제목·사진이 비어 있으면 카톡 등 미리보기에 상품 페이지(쿠팡 등)의 기본 사진·제목이 그대로 나옴
+          // 제목·사진칸을 비워두면 카톡 등 미리보기에 상품 페이지(쿠팡 등)의 기본 사진·제목이 그대로 나옴
+          const sourceNames = { card: '상품 카드', goldbox: '골드박스', search: '상품 검색', page: '상품 페이지' };
           let message = data.converted ? '✅ 내 파트너스 링크로 변환했어요' : '✅ 링크를 불러왔어요';
-          if (!data.title && !data.image) message += ' · 카톡 미리보기엔 상품 페이지 기본 사진·제목이 그대로 나와요 (바꾸고 싶을 때만 입력)';
-          setProductStatus(message, '#3FBFA6');
+          message += data.previewTitle || data.previewImage
+            ? ' · ' + (sourceNames[data.previewSource] || '상품') + '에서 사진·제목을 가져왔어요'
+            : ' · 카톡 미리보기엔 상품 페이지 기본 사진·제목이 그대로 나와요';
+          setProductStatus(message + ' (바꾸고 싶을 때만 입력)', '#3FBFA6');
           return true;
         } catch (e) {
           if (requestId === productInfoRequestId) setProductStatus('⚠ 상품 정보를 불러오는 중 오류가 발생했어요', '#ff3860');
@@ -2529,13 +2660,8 @@ app.get('/admin', (req, res) => {
         document.getElementById('urlInput').value = p.productUrl;
         lastLoadedUrl = p.productUrl; // 내 키로 검색한 링크라 다시 불러올 필요 없음 (등록할 때 서버가 짧은 링크로 변환)
         document.getElementById('urlSigInput').value = '';
-        document.getElementById('titleInput').value = p.productName;
-        document.getElementById('createImageInput').value = p.productImage;
-        document.getElementById('priceInput').value = p.productPrice || '';
-        document.getElementById('discountRateInput').value = '';
-        updateCreatePreview();
-        updateCreatePriceLine();
-        setProductStatus('✅ 검색한 상품으로 채웠어요', '#3FBFA6');
+        fillProductFields({ previewTitle: p.productName, previewImage: p.productImage, price: p.productPrice });
+        setProductStatus('✅ 검색한 상품의 사진·제목을 가져왔어요 (바꾸고 싶을 때만 입력)', '#3FBFA6');
         closeSearchModal();
       }
 
@@ -2554,9 +2680,9 @@ app.get('/admin', (req, res) => {
         empty.innerHTML = html;
         empty.style.display = '';
       }
-      // 등록칸의 사진 미리보기 (사진이 없을 때는 이유를 글자로 보여줌)
+      // 등록칸의 사진 미리보기: 직접 넣은 사진이 우선, 없으면 자동으로 찾은 상품 기본 사진
       function updateCreatePreview(emptyText) {
-        const val = document.getElementById('createImageInput').value.trim();
+        const val = document.getElementById('createImageInput').value.trim() || document.getElementById('previewImageInput').value.trim();
         const img = document.getElementById('createImagePreview');
         img.style.display = 'none';
         if (val) {
@@ -3278,7 +3404,7 @@ app.get('/admin', (req, res) => {
 app.post('/admin/create', async (req, res) => {
   if (!isLoggedIn(req)) return res.redirect('/admin/login');
   const owner = getCurrentUser(req);
-  const { url, urlSig, title, description, image, expiresAt, milestoneStep, price, discountRate, abGroup, abVariant } = req.body;
+  const { url, urlSig, title, description, image, previewTitle, previewImage, expiresAt, milestoneStep, price, discountRate, abGroup, abVariant } = req.body;
   let finalUrl = extractFirstUrl(url) || String(url || '').trim();
   if (!finalUrl) return sendFormError(res, '링크를 입력해주세요');
   try {
@@ -3293,6 +3419,9 @@ app.post('/admin/create', async (req, res) => {
     title: title || '',
     description: description || '',
     image: cleanImageUrl(image) || '',
+    // 자동으로 찾은 상품 기본 사진·제목 (목록·공유 문구에만 쓰고, 카톡 미리보기는 상품 페이지 기본 카드 그대로)
+    previewTitle: String(previewTitle || '').trim().slice(0, 200),
+    previewImage: /^https?:\/\//i.test(String(previewImage || '').trim()) ? String(previewImage).trim() : '',
     createdAt: getTodayKST(),
     expiresAt: expiresAt || '',
     milestoneStep: parseInt(milestoneStep, 10) || 100,
