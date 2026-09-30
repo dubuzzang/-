@@ -478,19 +478,8 @@ async function fetchGoldboxProducts(accessKey, secretKey) {
     signal: AbortSignal.timeout(8000)
   });
   const data = await res.json();
-  if (data.rCode === '0' && Array.isArray(data.data)) {
-    console.log(JSON.stringify({ event: 'goldbox-fields', count: data.data.length, sample: data.data[0] ? Object.fromEntries(Object.entries(data.data[0]).map(([k, v]) => [k, typeof v === 'string' && v.length > 40 ? v.slice(0, 40) : v])) : null }));
-    return data.data;
-  }
+  if (data.rCode === '0' && Array.isArray(data.data)) return data.data;
   throw new Error(data.rMessage || ('오류 코드: ' + data.rCode));
-}
-
-// 파트너스 API 상품의 할인율: 할인율 필드가 있으면 그대로, 없으면 원래 가격과 판매가로 계산
-function productDiscountRate(product, price) {
-  const direct = Number(String(product.discountRate ?? product.discountRatio ?? product.discountPercent ?? '').replace(/[^\d.]/g, ''));
-  if (direct > 0 && direct < 100) return Math.round(direct);
-  const original = parsePriceNumber(product.originalPrice ?? product.basePrice ?? product.originPrice ?? product.listPrice ?? product.productOriginalPrice);
-  return price && original > price ? Math.round((original - price) / original * 100) : null;
 }
 
 // 검색 API가 주는 사진 주소(ads-partners.coupang.com/image1/...)는 브라우저에서 열면 504라 안 보임.
@@ -524,8 +513,8 @@ async function findCoupangPreview(productUrl, keyword, accessKey, secretKey) {
       return {
         title: String(product.productName || '').trim().slice(0, 200),
         image: /^https:\/\//.test(product.productImage || '') ? await resolveCoupangAdsImage(product.productImage) : '',
+        // 골드박스·검색 API에는 할인율·원래 가격이 없음 (2026-09-30 실제 응답 필드로 확인) → 할인율은 공유 문구에서만 읽음
         price: parsePriceNumber(product.productPrice),
-        discountRate: productDiscountRate(product, parsePriceNumber(product.productPrice)),
         source
       };
     }
