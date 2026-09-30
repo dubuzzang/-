@@ -899,54 +899,6 @@ const RADAR_BG = `
   </svg>
 `;
 
-// ===== 🚆 반짝딜 담기 북마크 버튼 =====
-// 쿠팡은 서버에서 상품 페이지를 못 읽어서(403), 상품 페이지를 보고 있는 내 브라우저가 대신 제목·사진·가격·할인율을 읽어
-// 대시보드 등록칸으로 넘겨줌. 아래 함수는 서버에서 실행되지 않고, 글자로 바뀌어 북마크(javascript:) 안에 들어감
-// 화면에서 못 찾는 값은 검색엔진용 상품 정보(JSON-LD)에서 가져와서, 폰 크롬(m.coupang.com)에서도 동작함
-// (폰에서 줄바꿈이 사라져도 깨지지 않게 함수 안에는 // 주석을 넣지 않음)
-function sendProductToDashboard(target) {
-  var text = function (selector) {
-    var el = document.querySelector(selector);
-    return el ? el.textContent.replace(/\s+/g, ' ').trim() : '';
-  };
-  var meta = function (name) {
-    var el = document.querySelector('meta[property="' + name + '"]');
-    return el ? el.getAttribute('content') || '' : '';
-  };
-  var num = function (value) {
-    var n = parseInt(String(value).replace(/[^\d]/g, ''), 10);
-    return n > 0 ? n : '';
-  };
-  var ld = {};
-  var scripts = document.querySelectorAll('script[type="application/ld+json"]');
-  for (var i = 0; i < scripts.length; i++) {
-    try {
-      var parsed = JSON.parse(scripts[i].textContent);
-      var nodes = [].concat(parsed['@graph'] || parsed);
-      for (var j = 0; j < nodes.length; j++) if (nodes[j] && nodes[j]['@type'] === 'Product') ld = nodes[j];
-    } catch (e) {}
-  }
-  var ldOffer = [].concat(ld.offers || [])[0] || {};
-  var ldImage = [].concat(ld.image || [])[0] || '';
-  var title = text('h1.product-title') || text('.prod-buy-header__title') || ld.name || '';
-  if (!title) {
-    title = meta('og:title');
-    if (/\|\s*쿠팡\s*$/.test(title)) title = title.replace(/\s*\|\s*쿠팡\s*$/, '').replace(/\s+-\s+[^-]+$/, '');
-  }
-  var image = String(meta('og:image') || ldImage.url || ldImage || '');
-  if (image.indexOf('//') === 0) image = 'https:' + image;
-  var price = num(text('.price-container .final-price-amount') || text('.final-price-amount') || text('.total-price strong') || ldOffer.price || ldOffer.lowPrice || meta('product:price:amount'));
-  var original = num(text('.price-container .original-price-amount') || text('.origin-price'));
-  var rateMatch = (text('.price-container .original-price') || text('.discount-percentage')).match(/(\d{1,2})\s*%/);
-  var discountRate = rateMatch ? Number(rateMatch[1]) : (price && original > price ? Math.round((original - price) / original * 100) : '');
-  var data = { url: location.href, title: title, image: image, price: price, discountRate: discountRate };
-  window.open(target + encodeURIComponent(JSON.stringify(data)), '_blank');
-}
-
-function productBookmarkletHref(host) {
-  return 'javascript:' + encodeURIComponent('(' + sendProductToDashboard.toString() + ')(' + JSON.stringify(host + '/admin#add=') + ')');
-}
-
 // ===== 사용법 설명서 (새 기능을 추가할 때마다 여기에 이어서 기록해요) =====
 const FEATURE_GUIDE = [
   {
@@ -954,7 +906,7 @@ const FEATURE_GUIDE = [
     items: [
       '새 링크 등록: 상품 링크(또는 공유 문구 통째로)를 붙여넣으면 제목·이미지·가격·할인율이 자동으로 채워지고, 짧은 주소는 랜덤으로 만들어져요',
       '쿠팡 링크는 다른 사람 파트너스 링크여도 등록된 쿠팡 API 키로 무조건 내 파트너스 링크로 바뀌어요 (쿠팡이 파트너스에서 뺀 상품은 변환이 안 돼요)',
-      '"🚆 반짝딜 담기" 버튼을 북마크바로 끌어다 놓고 쿠팡 상품 페이지에서 누르면, 사진·제목·가격·할인율까지 등록칸에 자동으로 채워져요',
+      '쿠팡은 서버에서 상품 정보를 읽지 못하게 막아둬서 링크 변환만 되고, 사진·제목은 직접 넣거나 🔍 검색으로 채워요',
       '"🔍 상품 이름으로 검색해서 채우기": 상품명 검색 → 사진/가격 보고 클릭하면 자동 입력',
       '링크 목록은 한 줄씩: "복사하기"는 🚆제목+가격+짧은 링크 공유 문구를, /r/코드를 누르면 짧은 링크만 복사해요',
       '📌 고정하지 않은 링크는 만든 지 3일이 지나면 자동으로 정리돼요'
@@ -2211,14 +2163,6 @@ app.get('/admin', (req, res) => {
           <button type="submit" id="createSubmitBtn" class="btn-primary" style="width:100%;">등록하기</button>
           <button type="button" onclick="openSearchModal()" class="btn-ghost" style="width:100%; margin-top:10px;">🔍 상품 이름으로 검색해서 채우기</button>
         </form>
-        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:14px; padding-top:12px; border-top:1px dashed rgba(255,111,181,0.3); font-size:11px; color:#8A6A93;">
-          <a href="${escapeHtml(productBookmarkletHref(host))}" id="bookmarkletLink" onclick="setProductStatus('이 버튼은 누르지 말고 북마크바로 끌어다 놓아주세요. 그다음 쿠팡 상품 페이지에서 누르면 돼요', '#E0A200'); return false;" title="북마크바로 끌어다 놓으세요" style="flex-shrink:0; background:linear-gradient(135deg, #FF6FB5, #B084F5); color:#fff; font-weight:800; font-size:12px; padding:7px 14px; border-radius:999px; text-decoration:none; cursor:grab;">🚆 반짝딜 담기</a>
-          <button type="button" class="btn-ghost" style="flex-shrink:0; font-size:11px; padding:6px 12px;" onclick="copyText(document.getElementById('bookmarkletLink').getAttribute('href'), this)">📋 북마크 주소 복사</button>
-          <div style="flex:1 1 260px; line-height:1.6;">
-            <div>💻 PC: 버튼을 북마크바로 끌어다 놓고, <b>쿠팡 상품 페이지에서 누르면</b> 사진·제목·가격·할인율까지 자동으로 채워져요</div>
-            <div>📱 폰: 쿠팡 상품을 <b>쿠팡 앱 말고 크롬</b>에서 열고, 주소창에 <b>반짝딜</b> 입력 → 뜨는 북마크를 누르면 똑같이 채워져요 (PC 크롬 북마크가 동기화돼 있거나, "북마크 주소 복사"로 폰에 북마크를 만들어두면 돼요)</div>
-          </div>
-        </div>
       </div>
 
       <div id="searchModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(255,240,247,0.7); z-index:1000; align-items:center; justify-content:center;">
@@ -2500,9 +2444,7 @@ app.get('/admin', (req, res) => {
         updateCreatePriceLine();
       }
 
-      // prefill: 🚆 반짝딜 담기 버튼이 상품 페이지에서 직접 읽어온 정보 (서버가 찾은 것보다 정확해서 우선)
-      async function loadProductInfo(text, prefill) {
-        prefill = prefill || {};
+      async function loadProductInfo(text) {
         const input = document.getElementById('urlInput');
         const submitBtn = document.getElementById('createSubmitBtn');
         text = (text || input.value).trim();
@@ -2510,7 +2452,7 @@ app.get('/admin', (req, res) => {
         if (!match) { setProductStatus('⚠ 링크를 먼저 붙여넣어주세요', '#ff3860'); return false; }
         input.value = match[0].replace(/[)\\]}.,!?"'>]+$/, '');
         document.getElementById('urlSigInput').value = '';
-        fillProductFields(prefill, '⏳<br>사진 찾는 중');
+        fillProductFields({}, '⏳<br>사진 찾는 중');
 
         const requestId = ++productInfoRequestId;
         setProductStatus('⏳ 상품 정보를 불러오는 중...');
@@ -2519,27 +2461,17 @@ app.get('/admin', (req, res) => {
           const res = await fetch('/admin/api/product-info?text=' + encodeURIComponent(text));
           const data = await res.json();
           if (requestId !== productInfoRequestId) return false;
-          const isCoupang = /coupang\\.com|coupa\\.ng/i.test(input.value);
-          fillProductFields({
-            title: prefill.title || data.title,
-            image: prefill.image || data.image,
-            price: prefill.price || data.price,
-            discountRate: prefill.discountRate || data.discountRate
-          }, isCoupang ? '쿠팡 사진은<br>🚆 버튼으로' : '사진<br>못 찾음');
+          fillProductFields(data, '사진 주소를<br>넣어주세요');
           if (!data.success) { setProductStatus('⚠ ' + data.error, '#ff3860'); return false; }
           input.value = data.url;
           lastLoadedUrl = data.url;
           document.getElementById('urlSigInput').value = data.urlSig || '';
           checkDuplicateUrl();
-          const hasImage = !!(prefill.image || data.image);
-          const hasTitle = !!(prefill.title || data.title);
+          // 쿠팡은 상품 페이지·API를 서버와 다른 사이트에서 못 읽게 막아둬서 링크 변환만 하고, 사진·제목은 직접 채움
+          const missing = [!data.title && '제목', !data.image && '사진'].filter(Boolean);
           let message = data.converted ? '✅ 내 파트너스 링크로 변환했어요' : '✅ 링크를 불러왔어요';
-          if (!hasImage || !hasTitle) {
-            message += data.converted
-              ? ' · 쿠팡은 서버에서 사진/제목을 못 읽어요 → 쿠팡 상품 페이지(PC·폰 크롬)에서 🚆 반짝딜 담기 북마크를 누르면 자동으로 채워져요'
-              : ' · ' + [!hasTitle && '제목', !hasImage && '사진'].filter(Boolean).join('/') + '은(는) 못 찾아서 직접 입력하거나 🔍 검색으로 채워주세요';
-          }
-          setProductStatus(message, hasImage && hasTitle ? '#3FBFA6' : '#E0A200');
+          if (missing.length) message += ' · ' + missing.join('/') + '은(는) 직접 입력하거나 🔍 검색으로 채워주세요';
+          setProductStatus(message, missing.length ? '#E0A200' : '#3FBFA6');
           return true;
         } catch (e) {
           if (requestId === productInfoRequestId) setProductStatus('⚠ 상품 정보를 불러오는 중 오류가 발생했어요', '#ff3860');
@@ -2647,17 +2579,6 @@ app.get('/admin', (req, res) => {
           showImageEmpty(typeof emptyText === 'string' ? emptyText : '🖼️<br>사진 미리보기');
         }
       }
-
-      // ===== 🚆 반짝딜 담기(북마크 버튼)로 넘어온 상품 정보를 등록칸에 채우기 =====
-      (function fillFromBookmarklet() {
-        if (location.hash.indexOf('#add=') !== 0) return;
-        let data = null;
-        try { data = JSON.parse(decodeURIComponent(location.hash.slice(5))); } catch (e) {}
-        history.replaceState(null, '', location.pathname + location.search);
-        if (!data || !data.url) return;
-        document.getElementById('createForm').scrollIntoView({ block: 'center' });
-        loadProductInfo(data.url, data);
-      })();
 
       const charts = {};
 
