@@ -422,8 +422,7 @@ function stripCoupangTracking(url) {
 function canonicalCoupangUrl(url) {
   const urlObj = new URL(url);
   const productId = (urlObj.pathname.match(/\/(?:vp|vm)\/products\/(\d+)/) || [])[1];
-  // 상품이 아닌 쿠팡 페이지(이벤트·기획전 등)는 추적값만 떼고 나머지 주소는 그대로 둠
-  if (!productId) return stripCoupangTracking(url);
+  if (!productId) return urlObj.origin + urlObj.pathname;
   const params = new URLSearchParams();
   ['itemId', 'vendorItemId'].forEach((name) => {
     const value = urlObj.searchParams.get(name);
@@ -790,7 +789,8 @@ async function requestDeeplink(coupangUrl, accessKey, secretKey) {
 
 async function convertToDeeplink(coupangUrl, accessKey, secretKey) {
   const followed = await followLink(coupangUrl).catch(() => ({ url: coupangUrl }));
-  // 정리한 주소 → 추적값만 뗀 전체 주소 → 처음 받은 링크 순서로 시도 (쿠팡이 주소 모양 때문에 거절할 때만 다음 걸로)
+  // 예전과 같은 정리한 주소로 먼저 변환하고, 쿠팡이 주소 모양 때문에 거절할 때만
+  // 추적값만 뗀 전체 주소(이벤트 페이지의 landingId 등이 남음) → 처음 받은 링크 순서로 다시 시도
   const candidates = [...new Set([canonicalCoupangUrl(followed.url), stripCoupangTracking(followed.url), coupangUrl])];
   for (const candidate of candidates) {
     try {
@@ -1632,7 +1632,7 @@ app.post('/admin/edit', async (req, res) => {
   links[code].image = cleanImageUrl(image) || '';
   links[code].expiresAt = expiresAt || '';
   links[code].milestoneStep = parseInt(milestoneStep, 10) || 100;
-  links[code].price = price ? parseInt(price, 10) : null;
+  links[code].price = parsePriceNumber(price);
   links[code].discountRate = discountRate ? parseInt(discountRate, 10) : null;
   links[code].abGroup = abGroup || '';
   links[code].abVariant = abVariant || '';
@@ -2306,10 +2306,10 @@ app.get('/admin', (req, res) => {
             <div style="flex:1; min-width:0;">
               <input type="text" name="title" id="titleInput" placeholder="제목 (비워두면 상품 페이지 기본 제목 그대로)">
               <input type="text" name="image" id="createImageInput" placeholder="이미지 주소 (비워두면 상품 페이지 기본 사진 그대로)" oninput="updateCreatePreview()">
+              <input type="text" name="price" id="priceInput" inputmode="numeric" placeholder="가격 (와우할인가를 못 찾으면 직접 입력, 원)" oninput="updateCreatePriceLine()">
               <div id="createPriceLine" class="yellow-emph" style="font-size:13px; font-weight:800; color:#E0A200; margin:-4px 0 12px; display:none;"></div>
             </div>
           </div>
-          <input type="hidden" name="price" id="priceInput">
           <input type="hidden" name="discountRate" id="discountRateInput">
           <input type="hidden" name="urlSig" id="urlSigInput">
           <input type="hidden" name="previewTitle" id="previewTitleInput">
@@ -2569,7 +2569,8 @@ app.get('/admin', (req, res) => {
       }
 
       function updateCreatePriceLine() {
-        const price = parseInt(document.getElementById('priceInput').value, 10);
+        // "16,580"처럼 쉼표를 넣어 적어도 숫자만 읽음
+        const price = parseInt(document.getElementById('priceInput').value.replace(/[^\\d]/g, ''), 10);
         const rate = parseInt(document.getElementById('discountRateInput').value, 10);
         const line = document.getElementById('createPriceLine');
         line.innerHTML = price ? '💰 ' + price.toLocaleString() + '원' + (rate ? ' <span style="color:#ff3860;">🔻' + rate + '%</span>' : '') : '';
@@ -2597,7 +2598,8 @@ app.get('/admin', (req, res) => {
         document.getElementById('createImageInput').value = '';
         document.getElementById('previewTitleInput').value = info.previewTitle || '';
         document.getElementById('previewImageInput').value = info.previewImage || '';
-        document.getElementById('priceInput').value = info.price || '';
+        // 찾은 가격(골드박스·검색은 일반 판매가)을 넣어두고, 와우할인가는 칸에서 직접 고쳐 적으면 됨
+        document.getElementById('priceInput').value = info.price ? Number(info.price).toLocaleString() : '';
         document.getElementById('discountRateInput').value = info.discountRate || '';
         updateCreatePreview(emptyImageText);
         updateCreatePriceLine();
@@ -3467,7 +3469,7 @@ app.post('/admin/create', async (req, res) => {
     createdAt: getTodayKST(),
     expiresAt: expiresAt || '',
     milestoneStep: parseInt(milestoneStep, 10) || 100,
-    price: price ? parseInt(price, 10) : null,
+    price: parsePriceNumber(price), // "16,580"처럼 쉼표가 있어도 숫자만 저장
     discountRate: discountRate ? parseInt(discountRate, 10) : null,
     abGroup: abGroup || '',
     abVariant: abVariant || '',
