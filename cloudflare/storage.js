@@ -22,15 +22,20 @@ function getBinding(name, fallback = '') {
   return value === undefined || value === null ? fallback : value;
 }
 
-function jsonMiddleware(defaultsFactory) {
+// documentsFor(req): 그 요청에 필요한 문서 이름 목록 (null이면 전부). 안 읽은 문서는 읽기·쓰기 모두 오류로 막아서
+// 빈 문서로 덮어쓰는 일이 없게 함. 기본값이 함수면 R2에 그 문서가 없을 때만 부름 (예: 관리자 비밀번호 해시는 계산이 무거움)
+function jsonMiddleware(defaultsFactory, documentsFor) {
   if (!isCloudflare) return (_req, _res, next) => next();
 
   return async (_req, res, next) => {
     try {
       const defaults = typeof defaultsFactory === 'function' ? defaultsFactory() : defaultsFactory;
-      const entries = await Promise.all(Object.entries(defaults).map(async ([name, fallback]) => {
+      const needed = typeof documentsFor === 'function' ? documentsFor(_req) : null;
+      const names = Object.keys(defaults).filter((name) => !needed || needed.includes(name));
+      const entries = await Promise.all(names.map(async (name) => {
+        const fallback = defaults[name];
         const object = await api().env.DATA.get(`data/${name}.json`);
-        if (!object) return [name, clone(fallback)];
+        if (!object) return [name, clone(typeof fallback === 'function' ? fallback() : fallback)];
         try {
           return [name, JSON.parse(await object.text())];
         } catch (error) {
@@ -38,7 +43,7 @@ function jsonMiddleware(defaultsFactory) {
         }
       }));
 
-      const state = { documents: Object.fromEntries(entries), writes: new Map() };
+      const state = { documents: Object.fromEntries(entries), loaded: new Set(names), writes: new Map() };
       const originalEnd = res.end.bind(res);
       let ending = false;
 
@@ -83,6 +88,7 @@ function readJson(name, filePath, fallback) {
 
   const state = requestStorage.getStore();
   if (!state) throw new Error(`Cloudflare 요청 저장소가 준비되기 전에 ${name}을 읽으려고 했습니다.`);
+  if (!state.loaded.has(name)) throw new Error(`이 요청에서는 ${name} 문서를 불러오지 않았습니다.`);
   return clone(state.documents[name] === undefined ? fallback : state.documents[name]);
 }
 
@@ -94,6 +100,7 @@ function writeJson(name, filePath, value) {
 
   const state = requestStorage.getStore();
   if (!state) throw new Error(`Cloudflare 요청 저장소가 준비되기 전에 ${name}을 쓰려고 했습니다.`);
+  if (!state.loaded.has(name)) throw new Error(`이 요청에서는 ${name} 문서를 불러오지 않아서 쓸 수 없습니다.`);
   state.documents[name] = clone(value);
 
   const previous = state.writes.get(name) || Promise.resolve();

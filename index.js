@@ -1,6 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const cloudflareStorage = require('./cloudflare/storage');
+const clickCounter = require('./cloudflare/click-counter');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = cloudflareStorage.getBinding('ADMIN_PASSWORD', process.env.ADMIN_PASSWORD) || 'changeme';
@@ -173,6 +174,11 @@ if (!cloudflareStorage.isCloudflare && !fs.existsSync(USERS_FILE)) {
 
 function loadLinks() { return cloudflareStorage.readJson('links', DATA_FILE, {}); }
 function saveLinks(data) { cloudflareStorage.writeJson('links', DATA_FILE, data); }
+// 주소·폼으로 들어온 코드로 링크 찾기. links에 직접 있는 코드만 인정해서
+// /r/__proto__ 같은 주소가 기본 속성으로 잡혀 서버 메모리를 오염시키지 않게 함
+function hasLink(links, code) {
+  return typeof code === 'string' && Object.hasOwn(links, code);
+}
 
 // 다중 사용자 기능이 생기기 전에 만들어진 링크는 owner 정보가 없어서,
 // 그대로 두면 필터링 때 아무한테도 안 보이게 됨 → 서버 시작 시 자동으로 관리자 소유로 채워줌
@@ -226,7 +232,12 @@ function isInviteExpired(inv) {
   return getTodayKST() > inv.validUntil;
 }
 
+// 같은 날 같은 방문자의 클릭을 한 번만 세는 데 쓰는 IP.
+// Cloudflare에선 방문자가 바꿀 수 없는 cf-connecting-ip를 씀
+// (x-forwarded-for 첫 값은 방문자가 마음대로 넣을 수 있어서, 헤더만 바꿔 클릭 수를 부풀릴 수 있었음)
 function getClientIp(req) {
+  const cloudflareIp = req.headers['cf-connecting-ip'];
+  if (cloudflareIp) return String(cloudflareIp).trim();
   const forwarded = req.headers['x-forwarded-for'];
   if (forwarded) return forwarded.split(',')[0].trim();
   return req.socket.remoteAddress;
@@ -259,21 +270,15 @@ async function recordCountryClick(code, ip) {
   const country = await lookupCountry(ip);
   if (!country) return;
   const links = loadLinks();
+  if (!Object.hasOwn(links, code)) return;
   const link = links[code];
-  if (!link) return;
   if (!link.countryClicks) link.countryClicks = {};
   link.countryClicks[country] = (link.countryClicks[country] || 0) + 1;
   saveLinks(links);
 }
 
 function getCloudflareCountry(req) {
-  const code = String(req.headers['cf-ipcountry'] || '').toUpperCase();
-  if (!/^[A-Z]{2}$/.test(code) || code === 'XX') return null;
-  try {
-    return new Intl.DisplayNames(['ko'], { type: 'region' }).of(code) || code;
-  } catch (_error) {
-    return code;
-  }
+  return clickCounter.countryName(req.headers['cf-ipcountry']) || null;
 }
 
 function makeSessionToken(username) {
@@ -641,81 +646,8 @@ function parseShareText(text, url) {
 }
 
 
-// 쿠팡 상품 페이지 HTML에서 현재 가격을 추출 (실험적 기능)
-// 공식 API가 아니라 페이지 내용을 직접 읽어서 숫자를 찾는 방식이라,
-// 쿠팡이 페이지 구조를 바꾸면 못 찾을 수 있어요. 그럴 땐 조용히 실패하고 다음날 다시 시도해요.
-async function scrapeProductPrice(url) {
-  try {
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-    });
-    const html = await res.text();
-
-    const patterns = [
-      /"salePrice"\s*:\s*"?(\d{3,10})"?/,
-      /"finalPrice"\s*:\s*"?(\d{3,10})"?/,
-      /"price"\s*:\s*"?(\d{3,10})"?/,
-      /<meta[^>]+property=["']product:price:amount["'][^>]+content=["'](\d{3,10})["']/,
-      /origin-price[^>]*>[^\d]*([\d,]{4,10})/
-    ];
-    for (const re of patterns) {
-      const m = html.match(re);
-      if (m) {
-        const num = parseInt(m[1].replace(/,/g, ''), 10);
-        if (num > 0) return num;
-      }
-    }
-    return null;
-  } catch (e) {
-    return null;
-  }
-}
-
-// 매일 한 번, 등록된 모든 링크의 가격을 수집해서 기록
-const PRICE_STATE_FILE = '/data/priceCollectionState.json';
-const PRICE_BATCH_SIZE = cloudflareStorage.isCloudflare ? 20 : Number.MAX_SAFE_INTEGER;
-async function collectDailyPrices() {
-  const today = getTodayKST();
-  let state = { lastRun: '', collectionDate: '', cursor: 0 };
-  try {
-    state = {
-      ...state,
-      ...cloudflareStorage.readJson('priceCollectionState', PRICE_STATE_FILE, state)
-    };
-  } catch (e) {}
-  if (state.lastRun === today) return { complete: true, processed: 0 }; // 오늘 이미 했으면 넘어감
-
-  const links = loadLinks();
-  const codes = Object.keys(links).filter((code) => links[code] && links[code].url);
-  const cursor = state.collectionDate === today ? Math.max(0, Number(state.cursor) || 0) : 0;
-  const batch = codes.slice(cursor, cursor + PRICE_BATCH_SIZE);
-
-  for (let index = 0; index < batch.length; index++) {
-    const code = batch[index];
-    const link = links[code];
-    const price = await scrapeProductPrice(link.url);
-    if (price) {
-      if (!link.priceHistory) link.priceHistory = {};
-      link.priceHistory[today] = price;
-    }
-    if (index < batch.length - 1) await new Promise((r) => setTimeout(r, 800)); // 너무 빠르게 연속 요청하지 않도록 살짝 텀을 둠
-  }
-
-  saveLinks(links);
-  const nextCursor = cursor + batch.length;
-  const complete = nextCursor >= codes.length;
-  cloudflareStorage.writeJson('priceCollectionState', PRICE_STATE_FILE, {
-    lastRun: complete ? today : '',
-    collectionDate: today,
-    cursor: complete ? 0 : nextCursor
-  });
-  return { complete, processed: batch.length, remaining: Math.max(0, codes.length - nextCursor) };
-}
-
-// 서버가 켜져 있는 동안 1시간마다 "오늘 가격 수집 했나?" 확인해서, 안 했으면 실행
-if (!cloudflareStorage.isCloudflare) setInterval(() => { collectDailyPrices().catch(() => {}); }, 60 * 60 * 1000).unref();
-// 서버 시작 5분 뒤에도 한 번 확인 (그날 처음 켜졌을 때를 위해)
+// (예전의 "매일 쿠팡 상품 페이지에서 가격 수집"은 지웠어요. 쿠팡이 서버 접속을 전부 막아서(403) 한 번도 가격을 못 가져왔는데,
+//  매일 링크마다 접속 + 0.8초씩 쉬면서 그동안 클릭·저장 순서 줄을 막고 있었어요)
 
 // 이용기간이 끝난 사용자(관리자 제외, 평생이용 제외)의 링크를 자동으로 정리
 function cleanupExpiredUserLinks() {
@@ -743,7 +675,6 @@ function cleanupExpiredUserLinks() {
     return 0;
   }
 }
-if (!cloudflareStorage.isCloudflare) setTimeout(() => { collectDailyPrices().catch(() => {}); }, 5 * 60 * 1000).unref();
 
 // 고정(📌)하지 않은 링크는 만든 날로부터 정한 일수가 지나면(그 일수 전 생성분까지) 자동 삭제
 // 켜기/끄기와 일수는 사용자마다 링크 목록 위에서 정함 (따로 안 정했으면 예전처럼 켜짐·3일)
@@ -916,16 +847,24 @@ function isSubscriptionExpired(user) {
   return getTodayKST() > user.subscriptionExpiresAt;
 }
 
+// 요청마다 R2에서 읽을 문서. 짧은 링크 미리보기는 링크 문서만, 사진 중계는 아무 문서도 필요 없음 (나머지는 전부)
+function documentsForRequest(req) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return null;
+  if (/^\/r\/[^/]+\/?$/i.test(req.path)) return ['links'];
+  if (req.path === '/img-proxy') return [];
+  return null;
+}
+
 app.use(cloudflareStorage.jsonMiddleware(() => ({
   links: {},
   clicks: {},
-  users: {
+  // users.json이 없을 때(처음 한 번)만 만듦. 예전엔 요청마다 비밀번호 해시(scrypt)를 계산해서 요청 하나에 CPU 40ms 넘게 썼음
+  users: () => ({
     admin: { password: hashPassword(ADMIN_PASSWORD), isAdmin: true, youtubeId: '', email: '', nickname: '', avatarUrl: '', referredBy: '', totpSecret: '', totpEnabled: false, subscriptionType: 'lifetime', subscriptionExpiresAt: '', createdAt: getTodayKST(), adminNote: '' }
-  },
+  }),
   activity: [],
-  invites: [],
-  priceCollectionState: { lastRun: '' }
-})));
+  invites: []
+}), documentsForRequest));
 
 app.get('/', (_req, res) => {
   res.redirect(302, '/admin/login');
@@ -937,9 +876,8 @@ app.post('/__cloudflare/maintenance', async (_req, res) => {
   try {
     const removedOldLinks = cleanupOldLinks();
     const archivedGoldbox = await archiveGoldboxProducts().catch(() => 0);
-    const prices = await collectDailyPrices();
     const removedExpiredLinks = cleanupExpiredUserLinks();
-    res.json({ success: true, prices, removedExpiredLinks, removedOldLinks, archivedGoldbox });
+    res.json({ success: true, removedExpiredLinks, removedOldLinks, archivedGoldbox });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -992,7 +930,7 @@ function isLinkPreviewBot(req) {
 app.get('/r/:code', (req, res) => {
   const code = req.params.code;
   const links = loadLinks();
-  if (!links[code]) return res.status(404).send('링크를 찾을 수 없어요');
+  if (!hasLink(links, code)) return res.status(404).send('링크를 찾을 수 없어요');
 
   const link = links[code];
 
@@ -1033,43 +971,33 @@ app.get('/r/:code', (req, res) => {
 });
 
 // 2단계: 실제 사람만 여기까지 넘어와서 클릭이 카운트되고 쿠팡으로 이동
+// Cloudflare에선 cloudflare/entry.mjs의 빠른 경로가 먼저 답하고(클릭 수는 대기열로), 이 경로는 로컬 개발과 예비용
 app.get('/r/:code/go', (req, res) => {
   const code = req.params.code;
   const links = loadLinks();
-  if (!links[code]) return res.status(404).send('링크를 찾을 수 없어요');
+  const answer = clickCounter.clickResponse(links, code, getTodayKST());
+  if (answer && answer.status !== 302) return res.status(answer.status).send(answer.body);
+  // answer가 없으면 링크는 있는데 주소 모양이 특이한 경우 → 예전처럼 저장된 주소로 그대로 이동
+  const location = answer ? answer.location : links[code].url;
 
-  const link = links[code];
-
-  if (isExpired(link)) {
-    return res.status(410).send('이 링크는 기간이 종료되어 더 이상 사용할 수 없어요.');
-  }
-
-  const today = getTodayKST();
   const ip = getClientIp(req);
-  const clicks = loadClicks();
-  const src = req.query.src || 'other';
-
-  if (!clicks[code]) clicks[code] = {};
-  if (!clicks[code][today]) clicks[code][today] = {};
-
-  const alreadyClickedToday = clicks[code][today][ip];
-
-  if (!alreadyClickedToday) {
-    if (!link.dailyClicks) link.dailyClicks = {};
-    link.dailyClicks[today] = (link.dailyClicks[today] || 0) + 1;
-    if (!link.sourceClicks) link.sourceClicks = {};
-    link.sourceClicks[src] = (link.sourceClicks[src] || 0) + 1;
-    const country = cloudflareStorage.isCloudflare ? getCloudflareCountry(req) : null;
-    if (country) {
-      if (!link.countryClicks) link.countryClicks = {};
-      link.countryClicks[country] = (link.countryClicks[country] || 0) + 1;
+  // HEAD(미리보기 확인 등)는 클릭으로 세지 않음
+  if (req.method === 'GET') {
+    const clicks = loadClicks();
+    const counted = clickCounter.applyClickEvents(links, clicks, [{
+      code,
+      date: getTodayKST(),
+      ip,
+      source: req.query.src,
+      country: cloudflareStorage.isCloudflare ? getCloudflareCountry(req) : ''
+    }]);
+    if (counted) {
+      saveLinks(links);
+      saveClicks(clicks);
     }
-    saveLinks(links);
-    clicks[code][today][ip] = true;
-    saveClicks(clicks);
   }
 
-  res.redirect(link.url);
+  res.redirect(location);
 
   // 리다이렉트는 이미 보냈고, 그 이후에 조용히 지역 정보만 비동기로 기록 (사용자 체감 속도에 영향 없음)
   if (!cloudflareStorage.isCloudflare) recordCountryClick(code, ip).catch(() => {});
@@ -1587,8 +1515,8 @@ app.get('/admin/edit/:code', (req, res) => {
   if (!isLoggedIn(req)) return res.redirect('/admin/login');
   const links = loadLinks();
   const code = req.params.code;
+  if (!hasLink(links, code)) return res.status(404).send('링크를 찾을 수 없어요');
   const link = links[code];
-  if (!link) return res.status(404).send('링크를 찾을 수 없어요');
   if (!isAdminUser(req) && link.owner !== getCurrentUser(req)) {
     return res.status(403).send('이 링크에 대한 권한이 없어요');
   }
@@ -1685,7 +1613,7 @@ app.post('/admin/edit', async (req, res) => {
   if (!isLoggedIn(req)) return res.redirect('/admin/login');
   const { code, url, title, description, image, expiresAt, milestoneStep, price, discountRate, abGroup, abVariant } = req.body;
   const links = loadLinks();
-  if (!links[code]) return res.status(404).send('링크를 찾을 수 없어요');
+  if (!hasLink(links, code)) return res.status(404).send('링크를 찾을 수 없어요');
   if (!isAdminUser(req) && links[code].owner !== getCurrentUser(req)) {
     return res.status(403).send('이 링크에 대한 권한이 없어요');
   }
@@ -1856,18 +1784,6 @@ function computeStats(links, today) {
 
   return { platforms, totalToday, totalDaily, totalTodayAll, totalDailyAll, rankingEntries, perLink, overallRanking, platformRanking };
 }
-
-app.post('/admin/api/collect-prices-now', async (req, res) => {
-  if (!isLoggedIn(req)) return res.status(401).json({ success: false });
-  if (!isAdminUser(req)) return res.status(403).json({ success: false, error: '관리자만 실행할 수 있어요' });
-  try {
-    cloudflareStorage.writeJson('priceCollectionState', PRICE_STATE_FILE, { lastRun: '' }); // 강제로 다시 돌게
-    await collectDailyPrices();
-    res.json({ success: true });
-  } catch (e) {
-    res.json({ success: false, error: e.message });
-  }
-});
 
 app.get('/admin/api/refresh', (req, res) => {
   if (!isLoggedIn(req)) return res.status(401).json({ success: false, error: '로그인이 필요해요' });
@@ -3573,7 +3489,8 @@ app.post('/admin/delete', (req, res) => {
   if (!isLoggedIn(req)) return res.redirect('/admin/login');
   const { code } = req.body;
   const links = loadLinks();
-  if (links[code] && !isAdminUser(req) && links[code].owner !== getCurrentUser(req)) {
+  if (!hasLink(links, code)) return res.redirect('/admin');
+  if (!isAdminUser(req) && links[code].owner !== getCurrentUser(req)) {
     return res.status(403).send('이 링크에 대한 권한이 없어요');
   }
   delete links[code];
@@ -3585,7 +3502,7 @@ app.post('/admin/toggle-pin', (req, res) => {
   if (!isLoggedIn(req)) return res.redirect('/admin/login');
   const { code } = req.body;
   const links = loadLinks();
-  if (!links[code]) return res.redirect('/admin');
+  if (!hasLink(links, code)) return res.redirect('/admin');
   if (!isAdminUser(req) && links[code].owner !== getCurrentUser(req)) {
     return res.status(403).send('이 링크에 대한 권한이 없어요');
   }

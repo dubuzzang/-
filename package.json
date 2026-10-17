@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "npm run check:worker",
+    "test": "node --test test/*.test.js && npm run check:worker",
     "build": "node cloudflare/build.mjs",
     "dev:cloudflare": "npm run build && wrangler dev --config cloudflare/worker.jsonc",
     "deploy:cloudflare": "npm run deploy:worker && npm run deploy:pages",
