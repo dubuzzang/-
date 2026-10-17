@@ -560,9 +560,11 @@ async function findCoupangPreview(productUrl, keyword, accessKey, secretKey) {
   });
   const findIn = (products) => products.find((item) => isSameCoupangProduct(target, item.productUrl, item.productId));
 
-  // 상품명 전체(50자 안) → 못 찾으면 첫 쉼표 앞 핵심 상품명("세타필 로션 591ml, 단품, 1개" → "세타필 로션 591ml") 순서로 검색
+  // 상품명 전체(50자 안) → 못 찾으면 첫 쉼표 앞 핵심 상품명("세타필 로션 591ml, 단품, 1개" → "세타필 로션 591ml")
+  // → 그 이름에서 "(냉동)"·"[로켓프레시]" 같은 괄호 설명을 뺀 이름 순서로 검색 (어느 검색어든 상품·옵션 번호가 같아야 씀)
   const name = String(keyword || '').replace(/\s+/g, ' ').trim();
-  const keywords = [...new Set([limitSearchKeyword(name), limitSearchKeyword(name.split(',')[0])])].filter((k) => k.length >= 2);
+  const core = name.split(',')[0];
+  const keywords = [...new Set([name, core, core.replace(/\[[^\]]*\]|\([^)]*\)|【[^】]*】/g, ' ')].map(limitSearchKeyword))].filter((k) => k.length >= 2);
   const search = (k) => cachedCoupangCatalog('search:' + k, 10 * 60 * 1000, () => searchCoupangProducts(k, accessKey, secretKey));
 
   const [goldbox, archived, searched] = await Promise.all([
@@ -574,7 +576,10 @@ async function findCoupangPreview(productUrl, keyword, accessKey, secretKey) {
   let product = findIn(goldbox) || findIn(archived);
   if (product) return toPreview(product, 'goldbox');
   product = findIn(searched);
-  if (!product && keywords[1]) product = findIn(await search(keywords[1]));
+  for (const retry of keywords.slice(1)) {
+    if (product) break;
+    product = findIn(await search(retry));
+  }
   return product ? toPreview(product, 'search') : null;
 }
 
@@ -629,6 +634,11 @@ function parseProductMeta(html, pageUrl) {
   return { title, pageTitle, image, price, discountRate };
 }
 
+// 쿠팡 앱 공유 문구는 "쿠팡을 추천합니다!" 다음에 상품명이 와서, 이 인사말과 "상품 보기" 같은 안내 줄은 상품명으로 안 씀
+// (예전엔 "쿠팡을 추천합니다!"를 상품명으로 읽어서 검색이 늘 실패하고 사진을 못 가져왔음)
+const SHARE_TEXT_INTRO = /^\s*쿠팡을?\s*추천합니다[.!！]?\s*/;
+const SHARE_TEXT_LABEL = /^(?:쿠팡|coupang|링크|URL|상품\s*(?:링크|보기|바로가기)|자세히\s*보기|바로\s*구매하기|추천\s*상품)\s*[:!！.]?$/i;
+
 // 붙여넣은 공유 문구("상품명 / 12,900원 (35% 할인) / 링크")에서 제목·가격·할인율을 읽어냄
 function parseShareText(text, url) {
   const body = String(text || '').replace(url, ' ');
@@ -640,8 +650,8 @@ function parseShareText(text, url) {
     discountRate = Math.round((Math.max(...prices) - price) / Math.max(...prices) * 100);
   }
   const title = body.split(/\r?\n/)
-    .map((line) => line.replace(/https?:\/\/\S+/g, '').replace(/(\d{1,3}(?:,\d{3})+|\d{3,})\s*원.*$/, '').replace(/^[^\p{L}\p{N}[(]+/u, '').trim())
-    .find((line) => (line.match(/\p{L}/gu) || []).length >= 2 && !/파트너스|수수료|일환|제공받/.test(line)) || '';
+    .map((line) => line.replace(/https?:\/\/\S+/g, '').replace(SHARE_TEXT_INTRO, '').replace(/(\d{1,3}(?:,\d{3})+|\d{3,})\s*원.*$/, '').replace(/^[^\p{L}\p{N}[(]+/u, '').trim())
+    .find((line) => (line.match(/\p{L}/gu) || []).length >= 2 && !SHARE_TEXT_LABEL.test(line) && !/파트너스|수수료|일환|제공받|경제적\s*이해관계/.test(line)) || '';
   return { title: title.slice(0, 120), price, discountRate };
 }
 
