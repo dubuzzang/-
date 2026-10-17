@@ -745,15 +745,38 @@ function cleanupExpiredUserLinks() {
 }
 if (!cloudflareStorage.isCloudflare) setTimeout(() => { collectDailyPrices().catch(() => {}); }, 5 * 60 * 1000).unref();
 
-// 고정(📌)하지 않은 링크는 만든 날로부터 3일이 지나면(3일 전 생성분까지) 자동 삭제
+// 고정(📌)하지 않은 링크는 만든 날로부터 정한 일수가 지나면(그 일수 전 생성분까지) 자동 삭제
+// 켜기/끄기와 일수는 사용자마다 링크 목록 위에서 정함 (따로 안 정했으면 예전처럼 켜짐·3일)
 // + 같은 날 중복 클릭 확인용 캐시(clicks.json)에서 지난 날짜 기록도 같이 비움
-const LINK_RETENTION_DAYS = 3;
+const LINK_RETENTION_DEFAULT_DAYS = 3;
+const LINK_RETENTION_MAX_DAYS = 365;
+function validRetentionDays(value) {
+  const days = Number(value);
+  return Number.isInteger(days) && days >= 1 && days <= LINK_RETENTION_MAX_DAYS;
+}
+function linkRetentionSettings(user) {
+  const saved = (user && user.autoDelete) || {};
+  return {
+    enabled: saved.enabled !== false,
+    days: validRetentionDays(saved.days) ? Number(saved.days) : LINK_RETENTION_DEFAULT_DAYS
+  };
+}
+// 생성일 기록이 없던 예전 링크는 첫 클릭 날짜를 생성일로 봄 (클릭도 없으면 오늘부터 계산)
+function linkCreatedDate(link, today) {
+  return link.createdAt || Object.keys(link.dailyClicks || {}).sort()[0] || today;
+}
+// 지금 설정으로 다음 정리 때 지워질 링크 수 (목록 위 안내용)
+function countLinksToAutoDelete(links, settings) {
+  const today = getTodayKST();
+  const cutoff = addDaysToTodayKST(-settings.days);
+  return Object.values(links).filter((link) => !link.pinned && linkCreatedDate(link, today) <= cutoff).length;
+}
 function cleanupOldLinks() {
   try {
     const links = loadLinks();
     const clicks = loadClicks();
+    const users = loadUsers();
     const today = getTodayKST();
-    const cutoff = addDaysToTodayKST(-LINK_RETENTION_DAYS);
     let linksChanged = false;
     let clicksChanged = false;
     let removedCount = 0;
@@ -761,11 +784,12 @@ function cleanupOldLinks() {
     for (const code in links) {
       const link = links[code];
       if (!link.createdAt) {
-        // 생성일 기록이 없던 예전 링크는 첫 클릭 날짜를 생성일로 봄 (클릭도 없으면 오늘부터 계산)
-        link.createdAt = Object.keys(link.dailyClicks || {}).sort()[0] || today;
+        link.createdAt = linkCreatedDate(link, today);
         linksChanged = true;
       }
-      if (!link.pinned && link.createdAt <= cutoff) {
+      const settings = linkRetentionSettings(users[link.owner || 'admin']);
+      if (!settings.enabled) continue;
+      if (!link.pinned && link.createdAt <= addDaysToTodayKST(-settings.days)) {
         delete links[code];
         linksChanged = true;
         removedCount++;
@@ -786,7 +810,7 @@ function cleanupOldLinks() {
 
     if (linksChanged) saveLinks(links);
     if (clicksChanged) saveClicks(clicks);
-    if (removedCount > 0) logActivity('(시스템)', `${LINK_RETENTION_DAYS}일 지난 링크 자동 삭제`, `${removedCount}개 (고정 링크 제외)`);
+    if (removedCount > 0) logActivity('(시스템)', '정한 일수가 지난 링크 자동 삭제', `${removedCount}개 (고정 링크 제외)`);
     return removedCount;
   } catch (e) {
     return 0;
@@ -1085,7 +1109,7 @@ const FEATURE_GUIDE = [
       '제목·사진칸을 비워두면 카톡 등 미리보기에 쿠팡 등 상품 페이지의 기본 사진·제목이 그대로 나오고, 바꾸고 싶을 때만 직접 넣으면 돼요',
       '"🔍 상품 이름으로 검색해서 채우기": 상품명 검색 → 사진/가격 보고 클릭하면 자동 입력',
       '링크 목록은 한 줄씩: "복사하기"는 🚆제목+가격+짧은 링크 공유 문구를, /r/코드를 누르면 짧은 링크만 복사해요',
-      '📌 고정하지 않은 링크는 만든 지 3일이 지나면 자동으로 정리돼요'
+      '📌 고정하지 않은 링크는 만든 지 정한 일수(기본 3일)가 지나면 자동으로 정리돼요 — 링크 목록 위 🧹 자동 삭제에서 일수를 바꾸거나 끌 수 있어요'
     ]
   },
   {
@@ -1984,6 +2008,9 @@ app.get('/admin', (req, res) => {
   }
   const viewingUser = (isAdmin && req.query.viewUser) ? req.query.viewUser : currentUser;
   const links = getVisibleLinks(req);
+  // 링크 목록 위 🧹 자동 삭제 칸에 보여줄, 보고 있는 사용자의 설정과 다음 정리 때 지워질 개수
+  const retention = linkRetentionSettings(loadUsers()[viewingUser]);
+  const retentionPendingCount = countLinksToAutoDelete(links, retention);
   const host = req.protocol + '://' + req.get('host');
   const today = getTodayKST();
   const stats = computeStats(links, today);
@@ -2023,7 +2050,7 @@ app.get('/admin', (req, res) => {
 
     rows += `
       <div class="link-row glass" data-code="${escapeHtml(code)}" data-row-id="${rowId}">
-        <button type="button" class="row-pin" onclick="document.getElementById('pinform_${rowId}').submit();" title="${link.pinned ? '고정 해제' : '고정하면 3일이 지나도 자동 삭제되지 않아요'}">${link.pinned ? '📌' : '📍'}</button>
+        <button type="button" class="row-pin" onclick="document.getElementById('pinform_${rowId}').submit();" title="${link.pinned ? '고정 해제' : '고정하면 자동 삭제되지 않아요'}">${link.pinned ? '📌' : '📍'}</button>
         <form id="pinform_${rowId}" method="POST" action="/admin/toggle-pin" style="display:none;"><input type="hidden" name="code" value="${escapeHtml(code)}"></form>
         ${imgSrc ? `<img src="${imgSrc}" class="row-thumb" alt="" onerror="this.style.visibility='hidden';">` : '<div class="row-thumb" style="display:flex; align-items:center; justify-content:center; font-size:18px;">🛒</div>'}
         <div class="row-main">
@@ -2547,7 +2574,16 @@ app.get('/admin', (req, res) => {
         `;
       })()}
 
-      <div style="font-size:11px; color:#8A6A93; margin-bottom:8px;">📌 고정하지 않은 링크는 만든 지 ${LINK_RETENTION_DAYS}일이 지나면 자동으로 정리돼요</div>
+      ${viewingUser === currentUser ? `
+      <form method="POST" action="/admin/settings/auto-delete" id="autoDeleteForm" style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:11px; color:#8A6A93; margin-bottom:8px;">
+        <label style="display:flex; align-items:center; gap:4px; cursor:pointer; color:#E0399B; font-weight:700;"><input type="checkbox" name="enabled" value="1"${retention.enabled ? ' checked' : ''} style="width:auto; margin:0;">🧹 자동 삭제</label>
+        <span>고정(📌)하지 않은 링크를 만든 지</span>
+        <input type="number" name="days" min="1" max="${LINK_RETENTION_MAX_DAYS}" step="1" required value="${retention.days}" aria-label="자동 삭제 기준 일수" style="width:64px; margin:0; padding:4px 8px; font-size:12px; border-radius:10px;">
+        <span>일이 지나면 지워요 · 고정한 링크는 안 지워요</span>
+        <button type="submit" class="btn-ghost" style="padding:4px 12px; font-size:11px;">저장</button>
+        <span style="opacity:0.85;">${retention.enabled ? `지금 기준 다음 정리 때 ${retentionPendingCount}개 삭제` : '지금은 꺼져 있어요'}</span>
+      </form>` : `
+      <div style="font-size:11px; color:#8A6A93; margin-bottom:8px;">${retention.enabled ? `📌 이 사용자는 고정하지 않은 링크를 만든 지 ${retention.days}일이 지나면 자동으로 정리해요` : '이 사용자는 링크 자동 삭제를 꺼뒀어요'}</div>`}
       <div class="link-list" id="linkList">${rows || '<div style="font-size:12px; color:#8A6A93;">아직 만든 링크가 없어요</div>'}</div>
       <script>
         window.__totalClicks = ${scriptJson(rowData.totalClicks)};
@@ -3779,6 +3815,24 @@ app.post('/admin/settings/profile', (req, res) => {
   users[username].avatarUrl = avatarUrl || '';
   users[username].realName = (realName || '').slice(0, 30);
   saveUsers(users);
+  res.redirect('/admin');
+});
+
+// 링크 자동 삭제 설정 (사용자마다): 켜기/끄기 + 만든 지 며칠 지난 링크를 지울지. 고정한 링크는 안 지움
+app.post('/admin/settings/auto-delete', (req, res) => {
+  if (!isLoggedIn(req)) return res.redirect('/admin/login');
+  const username = getCurrentUser(req);
+  const users = loadUsers();
+  if (!users[username]) return res.redirect('/admin/login');
+  const enabled = req.body.enabled === '1';
+  if (enabled && !validRetentionDays(req.body.days)) {
+    return sendFormError(res, `자동 삭제 기준은 1~${LINK_RETENTION_MAX_DAYS}일 사이의 정수로 입력해 주세요.`);
+  }
+  // 끌 때는 일수 칸이 비어 있어도 예전에 정한 일수를 그대로 둠
+  const days = validRetentionDays(req.body.days) ? Number(req.body.days) : linkRetentionSettings(users[username]).days;
+  users[username].autoDelete = { enabled, days };
+  saveUsers(users);
+  logActivity(username, '링크 자동 삭제 설정', enabled ? `만든 지 ${days}일 지난 링크 삭제` : '끔');
   res.redirect('/admin');
 });
 

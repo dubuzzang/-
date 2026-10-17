@@ -17,8 +17,12 @@ The bucket contains:
 Write requests and click-count redirects pass through one `RequestCoordinator`
 Durable Object, preventing concurrent JSON read-modify-write operations from
 overwriting each other. Read-only requests bypass it. Price collection,
-expired-link cleanup, and removal of unpinned links created three or more days
-ago (plus past-day entries in `clicks.json`) run from the Worker's Cron Trigger.
+expired-link cleanup, and removal of unpinned links older than each owner's
+auto-delete setting (plus past-day entries in `clicks.json`) run from the
+Worker's Cron Trigger. The setting is stored per user in `users.json` as
+`autoDelete: { enabled, days }` and changed above the link list; users who
+never set it keep the original rule (on, 3 days). Pinned links are never
+auto-deleted.
 
 Preview deployments are disabled because they would otherwise write to the same
 production bucket. Runtime secrets are configured on the private Worker and are
