@@ -232,7 +232,7 @@ function isInviteExpired(inv) {
   return getTodayKST() > inv.validUntil;
 }
 
-// 같은 날 같은 방문자의 클릭을 한 번만 세는 데 쓰는 IP.
+// 클릭 기록 · 나라 통계에 쓰는 방문자 IP (클릭 수는 같은 IP 가 여러 번 눌러도 누를 때마다 셈).
 // Cloudflare에선 방문자가 바꿀 수 없는 cf-connecting-ip를 씀
 // (x-forwarded-for 첫 값은 방문자가 마음대로 넣을 수 있어서, 헤더만 바꿔 클릭 수를 부풀릴 수 있었음)
 function getClientIp(req) {
@@ -688,7 +688,7 @@ function cleanupExpiredUserLinks() {
 
 // 고정(📌)하지 않은 링크는 만든 날로부터 정한 일수가 지나면(그 일수 전 생성분까지) 자동 삭제
 // 켜기/끄기와 일수는 사용자마다 링크 목록 위에서 정함 (따로 안 정했으면 예전처럼 켜짐·3일)
-// + 같은 날 중복 클릭 확인용 캐시(clicks.json)에서 지난 날짜 기록도 같이 비움
+// + 예전 같은 날 중복 클릭 확인용 캐시(clicks.json)에 남은 지난 날짜 기록도 같이 비움 (이제 클릭은 누를 때마다 세서 새로 쓰지 않음)
 const LINK_RETENTION_DEFAULT_DAYS = 3;
 const LINK_RETENTION_MAX_DAYS = 365;
 function validRetentionDays(value) {
@@ -991,20 +991,16 @@ app.get('/r/:code/go', (req, res) => {
   const location = answer ? answer.location : links[code].url;
 
   const ip = getClientIp(req);
-  // HEAD(미리보기 확인 등)는 클릭으로 세지 않음
+  // HEAD(미리보기 확인 등)는 클릭으로 세지 않음 · 같은 IP 가 여러 번 눌러도 누를 때마다 셈
   if (req.method === 'GET') {
-    const clicks = loadClicks();
-    const counted = clickCounter.applyClickEvents(links, clicks, [{
+    const counted = clickCounter.applyClickEvents(links, [{
       code,
       date: getTodayKST(),
       ip,
       source: req.query.src,
       country: cloudflareStorage.isCloudflare ? getCloudflareCountry(req) : ''
     }]);
-    if (counted) {
-      saveLinks(links);
-      saveClicks(clicks);
-    }
+    if (counted) saveLinks(links);
   }
 
   res.redirect(location);

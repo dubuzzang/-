@@ -8,7 +8,7 @@ fully separate from the `du-bu.pages.dev` application and its data.
 The bucket contains:
 
 - `data/links.json`
-- `data/clicks.json`
+- `data/clicks.json` (legacy: the old once-per-IP-per-day check — no longer written; cron removes its past-day entries)
 - `data/users.json`
 - `data/activity.json`
 - `data/invites.json`
@@ -28,11 +28,13 @@ a per-isolate copy of `links.json` (reused for 5 seconds, re-read at most once a
 second when a code is missing, so new links work immediately). The visitor is
 redirected without waiting; the click is sent to the coordinator's
 `recordClick` RPC, stored in its SQLite table `pending_clicks`, and an alarm
-applies the queued clicks to `links.json` and `clicks.json` about 2 seconds
-later in one read and one write, inside the same serial lane as other writes.
-A click counts once per link, visitor IP and KST day; the IP comes only from
-`CF-Connecting-IP`, which visitors cannot spoof. HEAD requests are not counted.
-`cloudflare/click-counter.js` holds the shared counting rules.
+applies the queued clicks to `links.json` about 2 seconds later in one read and
+one write, inside the same serial lane as other writes.
+Every GET click counts, including repeated clicks from the same visitor IP on
+the same day (until 2026-10 a link counted once per visitor IP and KST day). The
+IP still comes only from `CF-Connecting-IP`, which visitors cannot spoof. HEAD
+requests are not counted. `cloudflare/click-counter.js` holds the shared
+counting rules.
 
 Expired-link cleanup, the Goldbox archive refresh, and removal of unpinned
 links older than each owner's auto-delete setting (plus past-day entries in

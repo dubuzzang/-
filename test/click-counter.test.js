@@ -13,10 +13,9 @@ const {
 const today = '2026-10-17';
 const yesterday = '2026-10-16';
 
-test('같은 링크·같은 IP·같은 날은 한 번만 세고, 유입 경로·국가별로도 더한다', () => {
+test('같은 IP가 같은 날 여러 번 눌러도 누를 때마다 세고, 유입 경로·국가별로도 더한다', () => {
   const links = { a: { url: 'https://x.test' }, b: { url: 'https://y.test', dailyClicks: { [today]: 5 } } };
-  const clicks = {};
-  const changed = applyClickEvents(links, clicks, [
+  const changed = applyClickEvents(links, [
     { code: 'a', date: today, ip: '1.1.1.1', source: 'kakao', country: '대한민국' },
     { code: 'a', date: today, ip: '1.1.1.1', source: 'direct', country: '대한민국' },
     { code: 'a', date: today, ip: '2.2.2.2', source: 'direct', country: '' },
@@ -25,13 +24,15 @@ test('같은 링크·같은 IP·같은 날은 한 번만 세고, 유입 경로·
     { code: 'deleted', date: today, ip: '3.3.3.3', source: 'kakao', country: '' }
   ]);
   assert.equal(changed, true);
-  assert.deepEqual(links.a.dailyClicks, { [today]: 2, [yesterday]: 1 });
-  assert.deepEqual(links.a.sourceClicks, { kakao: 2, direct: 1 });
-  assert.deepEqual(links.a.countryClicks, { 대한민국: 1 });
+  assert.deepEqual(links.a.dailyClicks, { [today]: 3, [yesterday]: 1 }, '같은 IP 1.1.1.1 의 두 번도 둘 다 셈');
+  assert.deepEqual(links.a.sourceClicks, { kakao: 2, direct: 2 });
+  assert.deepEqual(links.a.countryClicks, { 대한민국: 2 });
   assert.equal(links.b.dailyClicks[today], 6);
   assert.deepEqual(links.b.sourceClicks, { other: 1 }, '모르는 유입 경로는 other로');
   assert.equal(Object.hasOwn(links, 'deleted'), false);
-  assert.equal(applyClickEvents(links, clicks, [{ code: 'a', date: today, ip: '2.2.2.2', source: 'kakao' }]), false);
+  // 이미 센 IP 가 또 눌러도 다시 셈
+  assert.equal(applyClickEvents(links, [{ code: 'a', date: today, ip: '2.2.2.2', source: 'kakao' }]), true);
+  assert.equal(links.a.dailyClicks[today], 4);
 });
 
 test('__proto__ 같은 코드나 형식이 이상한 클릭은 받지 않고, 기본 속성을 건드리지 않는다', () => {
@@ -41,15 +42,14 @@ test('__proto__ 같은 코드나 형식이 이상한 클릭은 받지 않고, �
   ]) assert.equal(cleanClickEvent(bad), null, JSON.stringify(bad));
   // constructor · toString은 형식은 맞지만 links에 직접 있는 링크가 아니라서 세지 않음
   const links = { a: { url: 'https://x.test' } };
-  const clicks = {};
-  assert.equal(applyClickEvents(links, clicks, [
+  assert.equal(applyClickEvents(links, [
     { code: '__proto__', date: today, ip: '1.1.1.1' },
     { code: 'constructor', date: today, ip: '1.1.1.1' },
     { code: 'toString', date: today, ip: '1.1.1.1' }
   ]), false);
   assert.equal(({}).dailyClicks, undefined, 'Object.prototype가 오염되지 않음');
   assert.equal(Object.prototype[today], undefined);
-  assert.deepEqual(clicks, {});
+  assert.deepEqual(links, { a: { url: 'https://x.test' } });
 });
 
 test('이동 응답: 없는 코드·특수 코드는 404, 기간이 끝나면 410, 정상이면 302', () => {
@@ -66,7 +66,7 @@ test('이동 응답: 없는 코드·특수 코드는 404, 기간이 끝나면 41
   assert.equal(clickResponse(links, 'weird', today), null, '주소가 이상하면 예전 경로가 처리');
 });
 
-test('대기열 반영은 R2 문서를 한 번씩만 읽고 쓰며, links.json이 없으면 아무것도 쓰지 않는다', async () => {
+test('대기열 반영은 R2 links.json 만 한 번 읽고 한 번 쓰며, links.json이 없으면 아무것도 쓰지 않는다', async () => {
   const store = new Map([
     ['data/links.json', JSON.stringify({ a: { url: 'https://x.test', title: 'keep' } })]
   ]);
@@ -75,13 +75,14 @@ test('대기열 반영은 R2 문서를 한 번씩만 읽고 쓰며, links.json�
     async get(key) { calls.push('get ' + key); return store.has(key) ? { text: async () => store.get(key) } : null; },
     async put(key, value) { calls.push('put ' + key); store.set(key, value); }
   };
-  const events = Array.from({ length: 500 }, (_, i) => ({ code: 'a', date: today, ip: `10.0.${i >> 8}.${i & 255}`, source: 'kakao', country: '' }));
+  // IP 10개가 50번씩 (같은 IP 가 여러 번 눌러도 다 셈)
+  const events = Array.from({ length: 500 }, (_, i) => ({ code: 'a', date: today, ip: `10.0.0.${i % 10}`, source: 'kakao', country: '' }));
   assert.equal(await flushClickBatch(bucket, events), true);
-  assert.deepEqual(calls.sort(), ['get data/clicks.json', 'get data/links.json', 'put data/clicks.json', 'put data/links.json']);
+  assert.deepEqual(calls, ['get data/links.json', 'put data/links.json']);
   const links = JSON.parse(store.get('data/links.json'));
   assert.equal(links.a.title, 'keep');
   assert.equal(links.a.dailyClicks[today], 500);
-  assert.equal(Object.keys(JSON.parse(store.get('data/clicks.json')).a[today]).length, 500);
+  assert.equal(store.has('data/clicks.json'), false, '중복 확인용 clicks.json 은 이제 안 씀');
 
   calls.length = 0;
   assert.equal(await flushClickBatch(bucket, []), false);
