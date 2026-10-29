@@ -1046,7 +1046,7 @@ const FEATURE_GUIDE = [
       '쿠팡 상품 사진·제목은 상품 카드 링크·골드박스·상품 검색(공유 문구에 상품명이 있을 때)에서 자동으로 가져와 목록에 보여줘요',
       '제목·사진칸을 비워두면 카톡 등 미리보기에 쿠팡 등 상품 페이지의 기본 사진·제목이 그대로 나오고, 바꾸고 싶을 때만 직접 넣으면 돼요',
       '"🔍 상품 이름으로 검색해서 채우기": 상품명 검색 → 사진/가격 보고 클릭하면 자동 입력',
-      '링크 목록은 한 줄씩: "복사하기"는 🚆제목+가격+짧은 링크 공유 문구를, /r/코드를 누르면 짧은 링크만 복사해요',
+      '링크 목록은 한 줄씩: 상품 제목을 누르면 그 링크가 새 탭으로 열리고, "복사하기"는 🚆제목+가격+짧은 링크 공유 문구를, /r/코드를 누르면 짧은 링크만 복사해요',
       '📌 고정하지 않은 링크는 만든 지 정한 일수(기본 3일)가 지나면 자동으로 정리돼요 — 링크 목록 위 🧹 자동 삭제에서 일수를 바꾸거나 끌 수 있어요'
     ]
   },
@@ -1980,7 +1980,7 @@ app.get('/admin', (req, res) => {
         <form id="pinform_${rowId}" method="POST" action="/admin/toggle-pin" style="display:none;"><input type="hidden" name="code" value="${escapeHtml(code)}"></form>
         ${imgSrc ? `<img src="${imgSrc}" class="row-thumb" alt="" onerror="this.style.visibility='hidden';">` : '<div class="row-thumb" style="display:flex; align-items:center; justify-content:center; font-size:18px;">🛒</div>'}
         <div class="row-main">
-          <div class="row-title" title="${escapeHtml(shownTitle)}">${rowTitleHtml}</div>
+          <a class="row-title" href="${escapeHtml(shortUrl)}" target="_blank" rel="noopener" title="${escapeHtml(shownTitle ? `${shownTitle} — 누르면 이 링크로 가요` : '누르면 이 링크로 가요')}">${rowTitleHtml}</a>
           <div class="row-sub">${priceHtml}<span class="row-link" onclick="copyText('${shortUrl}', this)" title="클릭하면 짧은 링크만 복사돼요">/r/${escapeHtml(code)}</span>${isExpired(link) ? ' · <span style="color:#ff3860;">만료됨</span>' : ''}</div>
         </div>
         <div class="row-clicks mono" id="clicks_${rowId}" title="오늘 클릭 / 누적 클릭">${todayClicks}<span>누적 ${totalAllTime}</span></div>
@@ -2065,7 +2065,8 @@ app.get('/admin', (req, res) => {
       .row-pin { background: none; border: none; font-size: 16px; padding: 0; line-height: 1; flex-shrink: 0; }
       .row-thumb { width: 40px; height: 40px; border-radius: 10px; object-fit: cover; flex-shrink: 0; background: #FFF5FA; border: 1px solid rgba(255,111,181,0.24); }
       .row-main { flex: 1; min-width: 0; }
-      .row-title { font-size: 13px; font-weight: 700; color: #4A2545; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .row-title { display: block; font-size: 13px; font-weight: 700; color: #4A2545; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-decoration: none; }
+      .row-title:hover { color: #E0399B; text-decoration: underline; }
       .row-sub { font-size: 11px; color: #8A6A93; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
       .row-link { color: #B84FD6; cursor: pointer; }
       .row-clicks { flex-shrink: 0; text-align: right; font-size: 16px; font-weight: 800; color: #E0A200; line-height: 1.1; min-width: 40px; }
